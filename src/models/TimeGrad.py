@@ -11,6 +11,7 @@ from pts.model import weighted_average
 from src.utils.gaussian_diffusion import GaussianDiffusion
 from pts.model.time_grad import EpsilonTheta
 
+import time
 
 def get_lagged_subsequences(
     sequence: torch.Tensor,
@@ -250,6 +251,7 @@ class TimeGrad(nn.Module):
         
         repeated_x_new_y= repeat(x)
         repeated_y_date = repeat(y_date)
+        
 
         if self.rnn_type == "LSTM":
             repeated_states = [repeat(s, dim=1) for s in begin_states]
@@ -257,7 +259,8 @@ class TimeGrad(nn.Module):
             repeated_states = repeat(begin_states, dim=1)
 
         future_samples = []
-
+        
+        
         for k in range(self.pred_len):
             lags_x = get_lagged_subsequences(
                 sequence=repeated_x_new_y,
@@ -282,7 +285,6 @@ class TimeGrad(nn.Module):
             repeated_x_new_y = torch.cat(
                 (repeated_x_new_y, new_samples), dim=1
             )
-
         # (batch_size * num_samples, O, N)
         samples = torch.cat(future_samples, dim=1)
 
