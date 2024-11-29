@@ -57,9 +57,9 @@ class QICE(Metric):
         # Normalize the counts by the total number of samples
         
         y_true_ratio_by_bin = self.quantile_bin_counts.float() / self.total_samples.item()
-        print(self.total_samples,self.quantile_bin_counts )
-        print(y_true_ratio_by_bin.shape, torch.sum(y_true_ratio_by_bin),  torch.abs(
-            torch.sum(y_true_ratio_by_bin) - 1))
+        # print(self.total_samples,self.quantile_bin_counts )
+        # print(y_true_ratio_by_bin.shape, torch.sum(y_true_ratio_by_bin),  torch.abs(
+        #     torch.sum(y_true_ratio_by_bin) - 1))
         assert torch.abs(
             torch.sum(y_true_ratio_by_bin) - 1) < 1e-5, "Sum of quantile coverage ratios shall be 1!"
         qice_coverage_ratio = torch.abs(torch.ones(self.n_bins) / self.n_bins - y_true_ratio_by_bin).mean()

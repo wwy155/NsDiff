@@ -27,7 +27,7 @@ import concurrent.futures
 
 def update_metrics(preds, truths, metrics):
     """Function to update metrics in a separate process."""
-    metrics.update(preds.contiguous().cpu(), truths.contiguous().cpu())
+    metrics.update(preds.contiguous(), truths.contiguous())
 
 
 
@@ -38,7 +38,7 @@ class TimeGradParameters:
     rnn_type : str = 'LSTM'
     dropout_rate : float = 0.1
     lags_seq : List[int] = field(default_factory= lambda : [1, 24, 168])
-    diff_steps : int = 10
+    diff_steps : int = 20
     beta_end : float = 0.1
     beta_schedule : str = 'linear'
     residual_layers : int = 8
@@ -205,6 +205,8 @@ class TimeGradForecast(ForecastExp, TimeGradParameters):
 
 
     def _evaluate(self, dataloader):
+        self.model.eval()
+        self.metrics.reset()
         results = []
         with tqdm(total=len(dataloader.dataset)) as progress_bar:
             for batch_x, batch_y, batch_origin_x, batch_origin_y, batch_x_date_enc, batch_y_date_enc in dataloader:
@@ -217,7 +219,7 @@ class TimeGradForecast(ForecastExp, TimeGradParameters):
                     preds = self.scaler.inverse_transform(preds)
                     truths = batch_origin_y
 
-                results.append(self.task_pool.apply_async(update_metrics, (preds, truths, self.metrics)))
+                results.append(self.task_pool.apply_async(update_metrics, (preds.contiguous().cpu(), truths.contiguous().cpu(), self.metrics)))
                 
                 progress_bar.update(batch_x.shape[0])
 
