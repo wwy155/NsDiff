@@ -5,8 +5,6 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-# from gluonts.core.component import validated
-
 from pts.model import weighted_average
 from src.utils.gaussian_diffusion import GaussianDiffusion
 from pts.model.time_grad import EpsilonTheta
@@ -317,61 +315,6 @@ class TimeGrad(nn.Module):
             output.reshape(-1, self.pred_len, self.enc_in)
 
         return output
-        
-        
-        
-        
-
-        # def repeat(tensor, dim=0):
-        #     return tensor.repeat_interleave(repeats=self.num_parallel_samples, dim=dim)
-
-        # if self.cell_type == "LSTM":
-        #     repeated_states = [repeat(s, dim=1) for s in begin_states]
-        # else:
-        #     repeated_states = repeat(begin_states, dim=1)
-
-        
-        
-        
-        # _, begin_states = self.rnn_condition_output(x, x_date, y_date)
-        
-        
-        # # for each future time-units, draw new samples for this time-unit
-        # # and update the state
-        # for k in range(self.prediction_length):
-        #     lags = self.get_lagged_subsequences(
-        #         sequence=repeated_past_target_cdf,
-        #         sequence_length=self.history_length + k,
-        #         indices=self.shifted_lags,
-        #         subsequences_length=1,
-        #     )
-
-        #     rnn_outputs, repeated_states, _, _ = self.unroll(
-        #         begin_state=repeated_states,
-        #         lags=lags,
-        #         scale=repeated_scale,
-        #         time_feat=repeated_time_feat[:, k : k + 1, ...],
-        #         target_dimension_indicator=repeated_target_dimension_indicator,
-        #         unroll_length=1,
-        #     )
-
-        #     distr_args = self.distr_args(rnn_outputs=rnn_outputs) # B, T_C + O, 100
-
-        #     # (batch_size, 1, target_dim)
-        #     new_samples = self.diffusion.sample(cond=distr_args)
-
-        #     # (batch_size, seq_len, target_dim)
-        #     future_samples.append(new_samples)
-        #     repeated_past_target_cdf = torch.cat(
-        #         (repeated_past_target_cdf, new_samples), dim=1
-        #     )
-
-        # # (batch_size * num_samples, prediction_length, target_dim)
-        # samples = torch.cat(future_samples, dim=1)
-
-
-        
-        
 
     def train_forward(self, x, y, x_date, y_date):
         # x: (B, T, N)

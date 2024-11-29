@@ -7,7 +7,7 @@ import torch
 from src.experiments.forecast import ForecastExp 
 from dataclasses import dataclass, asdict, field
 from torch_timeseries.nn.embedding import freq_map
-from src.models.TimeGrad import TimeGrad
+from src.models.CSDI import CSDI_Forecasting
 from src.experiments.prob_forecast import ProbForecastExp
 from torchmetrics import MeanAbsoluteError, MeanSquaredError, MetricCollection
 from tqdm import tqdm
@@ -26,50 +26,64 @@ import concurrent.futures
 
 
 @dataclass
-class TimeGradParameters:
-    num_layers : int = 2
-    rnn_hidden_size : int = 40
-    rnn_type : str = 'LSTM'
-    dropout_rate : float = 0.1
-    lags_seq : List[int] = field(default_factory= lambda : [1, 24, 168])
-    diff_steps : int = 20
-    beta_end : float = 0.1
-    beta_schedule : str = 'linear'
-    residual_layers : int = 8
-    residual_channels : int = 8
-    context_length : int = 24
-    covariate_hidden_size : int = 128
-    conditioning_length : int = 100
-    dilation_cycle_length : int = 2
-    num_samples : int = 100
-    scale:bool = True
+class CSDIParameters:
+    layers:  int = 2  # 4
+    channels: int =  64 
+    nheads:  int = 8
+    diffusion_embedding_dim: int =  128
+    beta_start: int =  0.0001
+    beta_end: float =  0.5
+    num_steps: int =  20
+    schedule:  str = "quad"
+    is_linear: bool =  True
+    is_unconditional: int = 0
+    timeemb: int =  64
+    featureemb: int =  16
+    num_samples: int =  100
+    target_strategy: str =  "test"
+    # num_sample_features: int =  64
+
 
 @dataclass
-class TimeGradForecast(ProbForecastExp, TimeGradParameters):
-    model_type: str = "TimeGrad"
+class CSDIForecast(ProbForecastExp, CSDIParameters):
+    model_type: str = "CSDI"
     def _init_model(self):
-        self.model = TimeGrad(
-            pred_len=self.pred_len,
-            sequence_length=self.windows,
-            enc_in=self.dataset.num_features,
-            lags=self.lags_seq,
-            context_length=self.context_length,
-            TimeF = freq_map[self.dataset.freq],
-            rnn_hidden_size=self.rnn_hidden_size,
-            rnn_type = self.rnn_type,
-            num_layers=self.num_layers,
-            dropout_rate=self.dropout_rate,
-            scale=self.scale,            
-            conditioning_length=self.conditioning_length,
-            covariate_hidden_size=self.covariate_hidden_size,
-            diff_steps=self.diff_steps,
-            beta_end=self.beta_end,
-            beta_schedule=self.beta_schedule,
-            residual_layers=self.residual_layers,
-            residual_channels=self.residual_channels,
-            dilation_cycle_length=self.dilation_cycle_length,
+        
+        configs = {
+            "diffusion": {
+                "layers": self.layers,
+                "channels": self.channels,
+                "nheads": self.nheads,
+                "diffusion_embedding_dim": self.diffusion_embedding_dim,
+                "beta_start": self.beta_start,
+                "beta_end": self.beta_end,
+                "num_steps": self.num_steps,
+                "schedule": self.schedule,
+                "is_linear": self.is_linear,
+            },
+            "model":{
+                "is_unconditional": self.is_unconditional,
+                "timeemb": self.timeemb,
+                "featureemb": self.featureemb,
+                "target_strategy": self.target_strategy,
+                "num_sample_features": self.dataset.num_features, #  use all features to predict
+            }
+        }
+        self.model = CSDI_Forecasting(
+            config=configs,
+            device=self.device,
+            target_dim=self.dataset.num_features
             )
         self.model = self.model.to(self.device)
+        
+        
+        self.gt_mask = torch.concat([
+                torch.ones(size=(self.windows, self.dataset.num_features)),
+                torch.zeros(size=(self.pred_len, self.dataset.num_features)),
+            ]).to(self.device).bool()
+        
+        self.observation_mask = ~self.gt_mask
+
 
     def _process_train_batch(self, batch_x, batch_y, batch_x_date_enc, batch_y_date_enc):
         # inputs:
@@ -78,14 +92,15 @@ class TimeGradForecast(ProbForecastExp, TimeGradParameters):
         # ouputs:
         # - pred: (B, N)/(B, O, N)
         # - label: (B, N)/(B, O, N)
-        batch_x = batch_x.to(self.device).float()
-        batch_y = batch_y.to(self.device).float()
-        batch_x_date_enc = batch_x_date_enc.to(self.device).float()
-        batch_y_date_enc = batch_y_date_enc.to(self.device).float()
-
-        # no decoder input
-        # label_len = 1
-        noise, pred_noise = self.model(batch_x, batch_y, batch_x_date_enc, batch_y_date_enc, train=True)
+        
+        batch_input = {
+            "observed_data": torch.concat([batch_x, batch_y], dim=1),
+            "observed_mask": self.observation_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1),
+            "timepoints": torch.concat([batch_x_date_enc, batch_y_date_enc], dim=1)[:, :, 0],
+            "gt_mask": self.gt_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1),
+        }
+        
+        noise, pred_noise = self.model(batch_input, is_train=self.num_samples)
         return noise, pred_noise
 
     # def _evaluate(self, dataloader):
@@ -170,20 +185,28 @@ class TimeGradForecast(ProbForecastExp, TimeGradParameters):
         # ouputs:
         # - pred: (B, N)/(B, O, N)
         # - label: (B, N)/(B, O, N)
+        # - pred: (B, N)/(B, O, N)
+        # - label: (B, N)/(B, O, N)
+        
+        batch_input = {
+            "observed_data": torch.concat([batch_x, batch_y], dim=1),
+            "observed_mask": self.observation_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1),
+            "timepoints": torch.concat([batch_x_date_enc, batch_y_date_enc], dim=1)[:, :, 0],
+            "gt_mask": self.gt_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1),
+        }
+        
         batch_x = batch_x.to(self.device).float()
         batch_y = batch_y.to(self.device).float()
         batch_x_date_enc = batch_x_date_enc.to(self.device).float()
         batch_y_date_enc = batch_y_date_enc.to(self.device).float()
 
-        # no decoder input
-        # label_len = 1
-        # B, S, O, N
-        output = self.model(batch_x, batch_y, batch_x_date_enc, batch_y_date_enc, train=False)
-        output = output.permute(0, 2, 3, 1) # B, O, N, S
-        return output, batch_y
+        
+        samples, observed_data, target_mask, observed_mask, observed_tp = self.model.evaluate(batch_input, self.num_samples, 50)
+        samples = samples[:, :, :, -self.pred_len:]
+        return samples[:, :, :, -self.pred_len:].permute(0, 3, 2, 1), batch_y
 
 
 if __name__ == "__main__":
     import fire
     # torch.multiprocessing.set_start_method('spawn')# good solution !!!!
-    fire.Fire(TimeGradForecast)
+    fire.Fire(CSDIForecast)
