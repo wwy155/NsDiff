@@ -2,3 +2,4 @@ gluonts==0.9.6
 pytorchts
 CRPS
 linear_attention_transformer
+distributions

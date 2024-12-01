@@ -29,7 +29,7 @@ from torch_timeseries.utils import asdict_exc
 try:
     import wandb
 except:
-    print("Warning: wandb is not installed, some funtionality may not work.")
+    print("Warning: wandb is not installed, some funtionalities may not work.")
 @dataclass
 class ForecastSettings:
     horizon: int = 1
