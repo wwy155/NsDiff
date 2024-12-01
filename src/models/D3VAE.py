@@ -56,7 +56,7 @@ class D3VAE(nn.Module):
     def __init__(self, input_dim, embedding_dimension, freq, dropout_rate, beta_schedule, beta_start, beta_end, diff_steps,
                  sequence_length, scale ,  mult,  channel_mult,  prediction_length,  num_preprocess_blocks,  num_preprocess_cells,
                   num_channels_enc,  arch_instance,  num_latent_per_group,  num_channels_dec, 
-                   num_postprocess_blocks,  num_postprocess_cells, hidden_size,  target_dim,  num_layers, groups_per_scale):
+                   num_postprocess_blocks,  num_postprocess_cells, hidden_size,  target_dim,  num_layers, groups_per_scale, num_samples=100):
         super().__init__()
         """
         The whole model architecture consists of three main parts, the coupled diffusion process and the generative model are 
@@ -71,6 +71,7 @@ class D3VAE(nn.Module):
         self.sequence_length = sequence_length
         self.pred_len = prediction_length
         # Generate the diffusion schedule.
+        self.num_samples = num_samples
         sigmas = get_beta_schedule(beta_schedule, beta_start, beta_end, diff_steps)
         alphas = 1.0 - sigmas*0.5
         self.register_buffer("alphas_cumprod", torch.tensor(np.cumprod(alphas, axis=0)))
@@ -149,24 +150,59 @@ class D3VAE(nn.Module):
             out: Denoised results, remove the noise from y through score matching.
             tc: Total correlations, indicator of extent of disentangling.
         """
-        
-        input = self.embedding(x, mark)
-        x_t, _ = self.diffusion_gen.rnn(input)
-        input = torch.concat([x_t, input], axis=-1)
-        input = input.unsqueeze(1)
+        with torch.no_grad():
+            input = self.embedding(x, mark)
+            x_t, _ = self.diffusion_gen.rnn(input)
+            input = torch.concat([x_t, input], axis=-1)
+            input = input.unsqueeze(1)
 
-        logits, tc = self.diffusion_gen.generative(input)
-        output = self.diffusion_gen.generative.decoder_output(logits)
-        
+            logits, tc = self.diffusion_gen.generative(input)
+            output = self.diffusion_gen.generative.decoder_output(logits)
+            
         # The noisy generative results.
         y = output.mu.float()
+        y.requires_grad_(True)
         
         # Denoising the generatice results
         E = self.score_net(y).sum()
         # grad_x = torch.grad(E, y)[0]
-        grad_x = torch.autograd.grad(E, y, create_graph=True)[0]
+        E.requires_grad_(True)
+        grad_x = torch.autograd.grad(E, y, create_graph=False,  allow_unused=True)[0]
         out = y - grad_x*0.001
-        return y, out, tc
+        return y, out, output, tc
+
+
+    def prob_pred(self, x, mark):
+        """
+        generate the prediction by the trained model.
+        Return:
+            y: The noisy generative results
+            out: Denoised results, remove the noise from y through score matching.
+            tc: Total correlations, indicator of extent of disentangling.
+        """
+        B, T, N = x.shape
+        with torch.no_grad():
+            input = self.embedding(x, mark)
+            x_t, _ = self.diffusion_gen.rnn(input)
+            input = torch.concat([x_t, input], axis=-1)
+            input = input.unsqueeze(1)
+
+            logits, tc = self.diffusion_gen.generative(input)
+            output = self.diffusion_gen.generative.decoder_output(logits)
+            
+        # The noisy generative results.
+        # y = output.mu + torch.rand((B, 100, T, N)).to(x.device) * output.sigma
+        y = output.mu.float()
+        y.requires_grad_(True)
+        
+        # Denoising the generatice results
+        E = self.score_net(y).sum()
+        # grad_x = torch.grad(E, y)[0]
+        E.requires_grad_(True)
+        grad_x = torch.autograd.grad(E, y, create_graph=False,  allow_unused=True)[0]
+        # out = y - grad_x*0.001
+        out = y -  torch.rand((B, self.num_samples, T, N)).to(x.device) * grad_x * output.sigma#*0.001
+        return y, out, output, tc
 
 
 class Discriminator(nn.Module):

@@ -167,7 +167,7 @@ class ProbForecastExp(ForecastExp):
                     preds = self.scaler.inverse_transform(preds)
                     truths = batch_origin_y
 
-                results.append(self.task_pool.apply_async(update_metrics, (preds.contiguous().cpu(), truths.contiguous().cpu(), self.metrics)))
+                results.append(self.task_pool.apply_async(update_metrics, (preds.contiguous().cpu().detach(), truths.contiguous().cpu().detach(), self.metrics)))
                 
                 progress_bar.update(batch_x.shape[0])
 

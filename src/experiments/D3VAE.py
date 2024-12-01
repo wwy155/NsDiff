@@ -45,13 +45,13 @@ class D3VAEParameters:
     channel_mult: int = 2
     num_preprocess_blocks: int = 1
     num_preprocess_cells: int = 3
-    num_channels_enc: int = 32
+    num_channels_enc: int = 32 #
     arch_instance: str = 'res_mbconv'
     num_latent_per_group: int = 8
-    num_channels_dec : int = 32
+    num_channels_dec : int = 16 # default 32 but OOM 
     num_postprocess_blocks: int = 1
     num_postprocess_cells: int = 2
-    hidden_size: int = 128
+    hidden_size: int = 128 # default 128 but OOM 
     num_layers: int = 2
     groups_per_scale: int = 2
     psi : float = 0.5
@@ -145,9 +145,9 @@ class D3VAEForecast(ProbForecastExp, D3VAEParameters):
                 self.dataloader.val_loader,
                 self.dataloader.test_loader,
             )
-        self.train_steps = len(self.train_loader)
-        self.val_steps = len(self.val_loader)
-        self.test_steps = len(self.test_loader)
+        self.train_steps = len(self.train_loader.dataset)
+        self.val_steps = len(self.val_loader.dataset)
+        self.test_steps = len(self.test_loader.dataset)
 
         print(f"train steps: {self.train_steps}")
         print(f"val steps: {self.val_steps}")
@@ -181,10 +181,17 @@ class D3VAEForecast(ProbForecastExp, D3VAEParameters):
         # batch_x: (B, T, N)
         # batch_y: (B, O, N)
         # ouputs:
-        # - pred: (B, N)/(B, O, N)
-        # - label: (B, N)/(B, O, N)
+        # - pred: (B, O, N, S)
+        # - label: (B, O, N)
         
-        y, out, tc = self.model.pred(batch_x, batch_x_date_enc)
+        if self.windows < self.pred_len:
+            # pad input if input length is shorter
+            batch_x = torch.nn.functional.pad(batch_x.transpose(1, 2), (self.pred_len - self.windows, 0)).transpose(1, 2)
+            batch_x_date_enc = torch.nn.functional.pad(batch_x_date_enc.transpose(1, 2), (self.pred_len - self.windows, 0)).transpose(1, 2)
+
+        # y, out,output, tc = self.model.prob_pred(batch_x, batch_x_date_enc)
+        y, out,output, tc = self.model.pred(batch_x, batch_x_date_enc)
+        out = out.permute(0, 2, 3, 1)[:, :self.pred_len, :, :]
         return out, batch_y
 
 

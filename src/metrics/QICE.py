@@ -17,6 +17,7 @@ class QICE(Metric):
             preds: Tensor of shape (N, S) containing generated predictions
             targets: Tensor of shape (N, 1) containing ground truth values
         """
+        # print(preds[0, :, 0, :], targets[0, :, 0])
         
         preds = preds.view(-1, preds.size(3))  # Reshape to (B * O * N, S)
         targets = targets.view(-1)  # Reshape to (B * O * N,)
@@ -55,6 +56,7 @@ class QICE(Metric):
             The QICE score as a float.
         """
         # Normalize the counts by the total number of samples
+        
         
         y_true_ratio_by_bin = self.quantile_bin_counts.float() / self.total_samples.item()
         # print(self.total_samples,self.quantile_bin_counts )

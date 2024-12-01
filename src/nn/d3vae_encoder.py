@@ -47,7 +47,7 @@ def soft_clamp1(x):
 
 
 def sample_normal_jit(mu, sigma):
-    dist = torch.distributions.Normal(0, 1)
+    dist = torch.distributions.Normal(0, 1) # 8
     eps = dist.sample(mu.shape).to(mu.device) 
     z = mu + torch.exp(.5*sigma) * eps 
     
@@ -91,7 +91,7 @@ class NormalDecoder:
     def log_prob(self, samples):
         return self.dist.log_p(samples)
 
-    def sample(self,):
+    def sample(self, ):
         x, _ = self.dist.sample()
         return x
 
@@ -311,7 +311,6 @@ class Encoder(nn.Module):
                     #print(z.shape)
                     loss_qz = log_density_gaussian(z, mu_q, log_sig_q)
                     total_c += loss_qz
-                print(s.shape, z.shape)
                 s = cell(s, z)
                 idx_dec += 1
             else:
