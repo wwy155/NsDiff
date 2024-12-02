@@ -3,3 +3,6 @@ pytorchts
 CRPS
 linear_attention_transformer
 distributions
+opt-einsum
+cmake
+pykeops 

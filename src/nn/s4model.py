@@ -626,16 +626,17 @@ class SSKernelNPLR(nn.Module):
             rate = self.L / L
         if L is None:
             L = int(self.L / rate)
+        with torch.no_grad():
 
-        # Increase the internal length if needed
-        while rate * L > self.L:
-            self.double_length()
-        dt = torch.exp(self.log_dt) * rate
-        B = _r2c(self.B)
-        C = _r2c(self.C)
-        P = _r2c(self.P)
-        Q = P.conj() if self.Q is None else _r2c(self.Q)
-        w = self._w()
+            # Increase the internal length if needed
+            while rate * L > self.L:
+                self.double_length()
+            dt = torch.exp(self.log_dt) * rate
+            B = _r2c(self.B)
+            C = _r2c(self.C)
+            P = _r2c(self.P)
+            Q = P.conj() if self.Q is None else _r2c(self.Q)
+            w = self._w()
 
         if rate == 1.0:
             # Use cached FFT nodes
@@ -1102,9 +1103,9 @@ class S4(nn.Module):
 
         Returns: same shape as u
         """
+
         if not self.transposed: u = u.transpose(-1, -2)
         L = u.size(-1)
-
         # Compute SS Kernel
         k = self.kernel(L=L) # (C H L) (B C H L)
 

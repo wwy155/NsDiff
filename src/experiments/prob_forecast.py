@@ -164,10 +164,10 @@ class ProbForecastExp(ForecastExp):
                 preds, truths = self._process_val_batch(
                     batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
                 )
-                batch_origin_y = batch_origin_y.to(self.device)
+                origin_y = origin_y.to(self.device)
                 if self.invtrans_loss:
                     preds = self.scaler.inverse_transform(preds)
-                    truths = batch_origin_y
+                    truths = origin_y
 
                 results.append(self.task_pool.apply_async(update_metrics, (preds.contiguous().cpu().detach(), truths.contiguous().cpu().detach(), self.metrics)))
                 

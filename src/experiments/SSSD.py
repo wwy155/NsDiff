@@ -45,15 +45,15 @@ class SSSDParameters:
     expand: int=2 
     ff: int= 2 
     glu: bool=True
-    unet: bool=True # True will lead to nan, not yet know why https://github.com/state-spaces/s4/issues/138
-    dropout: float =0.0
+    unet: bool=True 
+    dropout: float =0.1
     in_channels: int=1
     out_channels: int=1
     diffusion_step_embed_dim_in: int=128 
     diffusion_step_embed_dim_mid: int=512
     diffusion_step_embed_dim_out: int=512
-    label_embed_dim: int=128
-    label_embed_classes: int=71
+    label_embed_dim: int = 128
+    label_embed_classes: int = 71
     bidirectional: bool=True
     s4_lmax: int=1
     s4_d_state: int=64
@@ -108,10 +108,6 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
         # - pred: (B, N)/(B, O, N)
         # - label: (B, N)/(B, O, N)
         # pip install pykeops==1.5 
-        batch_x = (batch_x - batch_x.mean(dim=1, keepdim=True))/batch_x.std(dim=1, keepdim=True)
-        batch_y = (batch_y - batch_x.mean(dim=1, keepdim=True))/batch_x.std(dim=1, keepdim=True)
-        batch_x = 5+10*torch.rand_like(batch_x)
-        batch_y = 5+10*torch.rand_like(batch_y)
         X = (
             torch.concat([batch_x, batch_y], dim=1).to(self.device).transpose(1,2).float(),
             torch.concat([batch_x, batch_y], dim=1).to(self.device).transpose(1,2).float(),
@@ -120,7 +116,6 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
             # torch.tensor(self.num_steps).unsqueeze(0).expand(batch_x.shape[0], -1).to(self.device).long(),
             # torch.concat([batch_x_date_enc, batch_y_date_enc], dim=1)[:, :, 0],
         )
-        
         
         T, Alpha_bar = self.num_steps, self.diffu_params["Alpha_bar"].to(self.device)
 
@@ -162,103 +157,38 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
         # - label: (B, N)/(B, O, N)
         # - pred: (B, N)/(B, O, N)
         # - label: (B, N)/(B, O, N)
+        X = (
+            torch.concat([batch_x, batch_y], dim=1).to(self.device).transpose(1,2).float(),
+            torch.concat([batch_x, batch_y], dim=1).to(self.device).transpose(1,2).float(),
+            self.observation_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1).transpose(1,2).to(self.device),
+            self.gt_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1).transpose(1,2).to(self.device),
+            # torch.tensor(self.num_steps).unsqueeze(0).expand(batch_x.shape[0], -1).to(self.device).long(),
+            # torch.concat([batch_x_date_enc, batch_y_date_enc], dim=1)[:, :, 0],
+        )
+
+        bs = X[0].shape[0]
+        T, Alpha, Alpha_bar, Sigma = self.diffu_params["T"], self.diffu_params["Alpha"], self.diffu_params["Alpha_bar"], self.diffu_params["Sigma"]
+        size = (bs*self.num_samples,X[0].shape[1] , X[0].shape[2] )
+        X = [x.repeat(self.num_samples, 1, 1) for x in X]
         
-        batch_input = {
-            "observed_data": torch.concat([batch_x, batch_y], dim=1),
-            "observed_mask": self.observation_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1),
-            "timepoints": torch.concat([batch_x_date_enc, batch_y_date_enc], dim=1)[:, :, 0],
-            "gt_mask": self.gt_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1),
-        }
-        
-        batch_x = batch_x.to(self.device).float()
-        batch_y = batch_y.to(self.device).float()
-        batch_x_date_enc = batch_x_date_enc.to(self.device).float()
-        batch_y_date_enc = batch_y_date_enc.to(self.device).float()
-
-        
-        samples, observed_data, target_mask, observed_mask, observed_tp = self.model.evaluate(batch_input, self.num_samples, 5)
-        samples = samples[:, :, :, -self.pred_len:]
-        return samples[:, :, :, -self.pred_len:].permute(0, 3, 2, 1), batch_y
-
-
-
-    def sampling(self, net, size, cond, mask, only_generate_missing=0, guidance_weight=0):
-        """
-        Perform the complete sampling step according to p(x_0|x_T) = \prod_{t=1}^T p_{\theta}(x_{t-1}|x_t)
-
-        Parameters:
-        size (tuple):                   size of tensor to be generated, 
-                                        usually is (number of audios to generate, channels=1, length of audio)
-        diffusion_hyperparams (dict):   dictionary of diffusion hyperparameters returned by calc_diffusion_hyperparams
-                                        note, the tensors need to be cuda tensors 
-        
-        Returns:
-        the generated audio(s) in torch.tensor, shape=size
-        """
-
-        # _dh = diffusion_hyperparams
-        # T, Alpha, Alpha_bar, Sigma = _dh["T"], _dh["Alpha"], _dh["Alpha_bar"], _dh["Sigma"]
-        # assert len(Alpha) == T
-        # assert len(Alpha_bar) == T
-        # assert len(Sigma) == T
-        # assert len(size) == 3
-
-        print('begin sampling, total number of reverse steps = %s' % T)
+        cond = X[1]
+        mask = X[2]
 
         x = std_normal(size)
 
         with torch.no_grad():
             for t in range(T - 1, -1, -1):
-                if only_generate_missing == 1:
-                    x = x * (1 - mask).float() + cond * mask.float()
+                # if only_generate_missing == 1:
+                #     x = x * (1 - mask).float() + cond * mask.float()
                 diffusion_steps = (t * torch.ones((size[0], 1))).cuda()  # use the corresponding reverse step
                 epsilon_theta = self.model((x, cond, mask, diffusion_steps,))  # predict \epsilon according to \epsilon_\theta
                 # update x_{t-1} to \mu_\theta(x_t)
                 x = (x - (1 - Alpha[t]) / torch.sqrt(1 - Alpha_bar[t]) * epsilon_theta) / torch.sqrt(Alpha[t])
                 if t > 0:
                     x = x + Sigma[t] * std_normal(size)  # add the variance term to x_{t-1}
+        x = x.reshape(bs, self.num_samples, X[0].shape[1] , X[0].shape[2]).permute(0, 2, 3, 1)
+        return x, batch_y
 
-        return x
-
-
-    def training_loss(self , X, diffusion_hyperparams, only_generate_missing=1):
-        """
-        Compute the training loss of epsilon and epsilon_theta
-
-        Parameters:
-        net (torch network):            the wavenet model
-        loss_fn (torch loss function):  the loss function, default is nn.MSELoss()
-        X (torch.tensor):               training data, shape=(batchsize, 1, length of audio)
-        diffusion_hyperparams (dict):   dictionary of diffusion hyperparameters returned by calc_diffusion_hyperparams
-                                        note, the tensors need to be cuda tensors       
-        
-        Returns:
-        training loss
-        """
-
-        _dh = diffusion_hyperparams
-        T, Alpha_bar = _dh["T"], _dh["Alpha_bar"]
-
-        audio = X[0]
-        cond = X[1]
-        mask = X[2]
-        loss_mask = X[3]
-
-        B, C, L = audio.shape  # B is batchsize, C=1, L is audio length
-        diffusion_steps = torch.randint(T, size=(B, 1, 1)).cuda()  # randomly sample diffusion steps from 1~T
-
-        z = std_normal(audio.shape)
-        if only_generate_missing == 1:
-            z = audio * mask.float() + z * (1 - mask).float()
-        transformed_X = torch.sqrt(Alpha_bar[diffusion_steps]) * audio + torch.sqrt(
-            1 - Alpha_bar[diffusion_steps]) * z  # compute x_t from q(x_t|x_0)
-        epsilon_theta = self.model(
-            (transformed_X, cond, mask, diffusion_steps.view(B, 1),))  # predict \epsilon according to \epsilon_\theta
-
-        if only_generate_missing == 1:
-            return self.loss_func(epsilon_theta[loss_mask], z[loss_mask])
-        elif only_generate_missing == 0:
-            return self.loss_func(epsilon_theta, z)
 
 
 if __name__ == "__main__":

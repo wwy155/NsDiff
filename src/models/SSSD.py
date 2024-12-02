@@ -255,7 +255,6 @@ class ResidualBlock(nn.Module):
         # add in diffusion step embedding
         part_t = self.fc_t(diffusion_step_embed).unsqueeze(2)
         z = x + part_t
-        
         # Prenorm
         z = self.norm(z.transpose(-1, -2)).transpose(-1, -2)
         z,_ = self.layer(z) 
