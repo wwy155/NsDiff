@@ -31,7 +31,7 @@ class CSDIParameters:
     channels: int =  64 
     nheads:  int = 8
     diffusion_embedding_dim: int =  128
-    beta_start: int =  0.0001
+    beta_start: float =  0.0001
     beta_end: float =  0.5
     num_steps: int =  20
     schedule:  str = "quad"
@@ -127,7 +127,7 @@ class CSDIForecast(ProbForecastExp, CSDIParameters):
         batch_y_date_enc = batch_y_date_enc.to(self.device).float()
 
         
-        samples, observed_data, target_mask, observed_mask, observed_tp = self.model.evaluate(batch_input, self.num_samples, 50)
+        samples, observed_data, target_mask, observed_mask, observed_tp = self.model.evaluate(batch_input, self.num_samples, 5)
         samples = samples[:, :, :, -self.pred_len:]
         return samples[:, :, :, -self.pred_len:].permute(0, 3, 2, 1), batch_y
 

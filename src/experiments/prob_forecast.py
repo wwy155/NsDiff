@@ -153,8 +153,10 @@ class ProbForecastExp(ForecastExp):
         self.metrics.reset()
         results = []
         with tqdm(total=len(dataloader.dataset)) as progress_bar:
-            for batch_x, batch_y, batch_origin_x, batch_origin_y, batch_x_date_enc, batch_y_date_enc in dataloader:
+            for batch_x, batch_y, origin_x, origin_y, batch_x_date_enc, batch_y_date_enc in dataloader:
                 batch_size = batch_x.size(0)
+                origin_x = origin_x.to(self.device)
+                origin_y = origin_y.to(self.device)
                 batch_x = batch_x.to(self.device).float()
                 batch_y = batch_y.to(self.device).float()
                 batch_x_date_enc = batch_x_date_enc.to(self.device).float()
@@ -224,6 +226,15 @@ class ProbForecastExp(ForecastExp):
                 start = time.time()
                 origin_y = origin_y.to(self.device)
                 self.model_optim.zero_grad()
+                
+                origin_x = origin_x.to(self.device)
+                origin_y = origin_y.to(self.device)
+                batch_x = batch_x.to(self.device).float()
+                batch_y = batch_y.to(self.device).float()
+                batch_x_date_enc = batch_x_date_enc.to(self.device).float()
+                batch_y_date_enc = batch_y_date_enc.to(self.device).float()
+
+                
                 pred, true = self._process_train_batch(
                     batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
                 )
