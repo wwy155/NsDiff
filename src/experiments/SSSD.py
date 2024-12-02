@@ -111,8 +111,8 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
         X = (
             torch.concat([batch_x, batch_y], dim=1).to(self.device).transpose(1,2).float(),
             torch.concat([batch_x, batch_y], dim=1).to(self.device).transpose(1,2).float(),
-            self.observation_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1).transpose(1,2).to(self.device),
             self.gt_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1).transpose(1,2).to(self.device),
+            self.observation_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1).transpose(1,2).to(self.device),
             # torch.tensor(self.num_steps).unsqueeze(0).expand(batch_x.shape[0], -1).to(self.device).long(),
             # torch.concat([batch_x_date_enc, batch_y_date_enc], dim=1)[:, :, 0],
         )
@@ -160,8 +160,8 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
         X = (
             torch.concat([batch_x, batch_y], dim=1).to(self.device).transpose(1,2).float(),
             torch.concat([batch_x, batch_y], dim=1).to(self.device).transpose(1,2).float(),
-            self.observation_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1).transpose(1,2).to(self.device),
             self.gt_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1).transpose(1,2).to(self.device),
+            self.observation_mask.unsqueeze(0).expand(batch_x.shape[0], -1, -1).transpose(1,2).to(self.device),
             # torch.tensor(self.num_steps).unsqueeze(0).expand(batch_x.shape[0], -1).to(self.device).long(),
             # torch.concat([batch_x_date_enc, batch_y_date_enc], dim=1)[:, :, 0],
         )
@@ -186,8 +186,8 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
                 x = (x - (1 - Alpha[t]) / torch.sqrt(1 - Alpha_bar[t]) * epsilon_theta) / torch.sqrt(Alpha[t])
                 if t > 0:
                     x = x + Sigma[t] * std_normal(size)  # add the variance term to x_{t-1}
-        x = x.reshape(bs, self.num_samples, X[0].shape[1] , X[0].shape[2]).permute(0, 2, 3, 1)
-        return x, batch_y
+        x = x.reshape(bs, self.num_samples, X[0].shape[1] , X[0].shape[2]).permute(0, 3, 2, 1)
+        return x[:, -self.pred_len:, :, :], batch_y
 
 
 
