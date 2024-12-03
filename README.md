@@ -1,6 +1,8 @@
-# 
 
-Some baselines, however, are not runnable after integrating into this repo. We list these issues and related modifications:
+
+# Modification
+
+Some baselines, however, are not runnable after integrating into this repo possibily because certain experiment settings and distinct hardwares. We list these issues and related modifications:
 
 
 ## SSSD:

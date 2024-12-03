@@ -1,12 +1,11 @@
-
 export PYTHONPATH=./
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
-python3 ./src/experiments/SSSD.py \
-   --dataset_type="ETTh1" \
+python3 ./src/experiments/TimeDiff.py \
+   --dataset_type="ExchangeRate" \
    --device="cuda:0" \
    --batch_size=32 \
    --horizon=1 \
-   --pred_len=96 \
-   --windows=96 \
-   --epochs=100   \
+   --pred_len=24 \
+   --windows=24 \
+   --epochs=20   \
    runs --seeds='[3]'
