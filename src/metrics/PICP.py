@@ -39,7 +39,7 @@ class PICP(Metric):
 
     def update(self, all_gen_y: torch.Tensor, y_true: torch.Tensor):
         # Reshape to (B * O * N, S)
-        all_gen_y = all_gen_y.view(-1, all_gen_y.size(3)).cpu()
+        all_gen_y = all_gen_y.view(-1, all_gen_y.shape[3]).cpu()
         y_true = y_true.view(-1).cpu()  # Reshape to (B * O * N,)
 
         # Compute the low and high percentiles using torch.quantile

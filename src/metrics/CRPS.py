@@ -22,7 +22,7 @@ class CRPS(Metric):
         def compute_crps(i):
             return pscore(pred_np[i], true_np[i]).compute()[0]
 
-        pred = pred.view(-1, pred.size(3))  # Reshape to (B * O * N, S)
+        pred = pred.view(-1, pred.shape[3])  # Reshape to (B * O * N, S)
         true = true.view(-1)  # Reshape to (B * O * N,)
         
         pred_np = pred.cpu().numpy()

@@ -18,13 +18,14 @@ from torch.optim import *
 from torch_timeseries.dataset import *
 from torch_timeseries.scaler import *
 from src.metrics import CRPS, CRPSSum, QICE, PICP
+from src.metrics import ProbMAE, ProbMSE, ProbRMSE
 
 from torch_timeseries.utils.model_stats import count_parameters
 from torch_timeseries.utils.early_stop import EarlyStopping
 from torch_timeseries.utils.parse_type import parse_type
 from torch_timeseries.utils.reproduce import reproducible
 from torch_timeseries.core import TimeSeriesDataset, BaseIrrelevant, BaseRelevant
-from torch_timeseries.dataloader import SlidingWindowTS
+from torch_timeseries.dataloader import SlidingWindowTS, ETTHLoader, ETTMLoader
 from torch_timeseries.experiments import ForecastExp
 from torch_timeseries.utils import asdict_exc
 import torch.multiprocessing as mp
@@ -38,7 +39,7 @@ except:
 
 def update_metrics(preds, truths, metrics):
     """Function to update metrics in a separate process."""
-    metrics.update(preds.contiguous(), truths.contiguous())
+    metrics.update(preds, truths)
 
 
 @dataclass
@@ -53,6 +54,9 @@ class ProbForecastExp(ForecastExp):
                 "crps_sum": CRPSSum(),
                 "qice": QICE(),
                 "picp": PICP(),
+                "mse": ProbMSE(),
+                "mae":ProbMAE(),
+                "rmse": ProbRMSE(),
             }
         )
         self.metrics.to("cpu")
@@ -162,14 +166,19 @@ class ProbForecastExp(ForecastExp):
                 batch_y = batch_y.to(self.device).float()
                 batch_x_date_enc = batch_x_date_enc.to(self.device).float()
                 batch_y_date_enc = batch_y_date_enc.to(self.device).float()
-                preds, truths = self._process_val_batch(
-                    batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
-                )
+                with torch.no_grad():
+                    preds, truths = self._process_val_batch(
+                        batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
+                    )
                 origin_y = origin_y.to(self.device)
                 if self.invtrans_loss:
                     preds = self.scaler.inverse_transform(preds)
                     truths = origin_y
-
+                    
+                # update_metrics(preds.contiguous().cpu().detach(), truths.contiguous().cpu().detach(), self.metrics)
+                # if isinstance(preds, np.ndarray):
+                #     results.append(self.task_pool.apply_async(update_metrics, (preds, truths, self.metrics)))
+                # else:
                 results.append(self.task_pool.apply_async(update_metrics, (preds.contiguous().cpu().detach(), truths.contiguous().cpu().detach(), self.metrics)))
                 
                 progress_bar.update(batch_x.shape[0])
@@ -186,23 +195,54 @@ class ProbForecastExp(ForecastExp):
         self._init_dataset()
         
         self.scaler = parse_type(self.scaler_type, globals=globals())()
+        if self.dataset_type[0:3] == "ETT":
+            if self.dataset_type[0:4] == "ETTh":
+                self.dataloader = ETTHLoader(
+                    self.dataset,
+                    self.scaler,
+                    window=self.windows,
+                    horizon=self.horizon,
+                    steps=self.pred_len,
+                    shuffle_train=True,
+                    freq=self.dataset.freq,
+                    batch_size=self.batch_size,
+                    num_worker=self.num_worker,
+                    fast_test=True,
+                    fast_val=True,
 
-        self.dataloader = SlidingWindowTS(
-            self.dataset,
-            self.scaler,
-            window=self.windows,
-            horizon=self.horizon,
-            steps=self.pred_len,
-            scale_in_train=True,
-            shuffle_train=True,
-            freq=self.dataset.freq,
-            batch_size=self.batch_size,
-            train_ratio=self.train_ratio,
-            test_ratio=self.test_ratio,
-            num_worker=self.num_worker,
-            fast_test=True,
-            fast_val=True,
-        )
+                )
+            elif  self.dataset_type[0:4] == "ETTm":
+                self.dataloader = ETTMLoader(
+                    self.dataset,
+                    self.scaler,
+                    window=self.windows,
+                    horizon=self.horizon,
+                    steps=self.pred_len,
+                    shuffle_train=True,
+                    freq=self.dataset.freq,
+                    batch_size=self.batch_size,
+                    num_worker=self.num_worker,
+                    fast_test=True,
+                    fast_val=True,
+                )
+        else:
+            self.dataloader = SlidingWindowTS(
+                self.dataset,
+                self.scaler,
+                window=self.windows,
+                horizon=self.horizon,
+                steps=self.pred_len,
+                scale_in_train=True,
+                shuffle_train=True,
+                freq=self.dataset.freq,
+                batch_size=self.batch_size,
+                train_ratio=self.train_ratio,
+                test_ratio=self.test_ratio,
+                num_worker=self.num_worker,
+                fast_test=True,
+                fast_val=True,
+            )
+
         self.train_loader, self.val_loader, self.test_loader = (
             self.dataloader.train_loader,
             self.dataloader.val_loader,
@@ -248,53 +288,53 @@ class ProbForecastExp(ForecastExp):
         self._run_print(f"vali_results: {val_result}")
         return val_result
 
-    def _train(self):
-        with torch.enable_grad(), tqdm(total=len(self.train_loader.dataset)) as progress_bar:
-            self.model.train()
-            train_loss = []
-            for i, (
-                batch_x,
-                batch_y,
-                origin_x,
-                origin_y,
-                batch_x_date_enc,
-                batch_y_date_enc,
-            ) in enumerate(self.train_loader):
-                start = time.time()
-                origin_y = origin_y.to(self.device)
-                self.model_optim.zero_grad()
+    # def _train(self):
+    #     with torch.enable_grad(), tqdm(total=len(self.train_loader.dataset)) as progress_bar:
+    #         self.model.train()
+    #         train_loss = []
+    #         for i, (
+    #             batch_x,
+    #             batch_y,
+    #             origin_x,
+    #             origin_y,
+    #             batch_x_date_enc,
+    #             batch_y_date_enc,
+    #         ) in enumerate(self.train_loader):
+    #             start = time.time()
+    #             origin_y = origin_y.to(self.device)
+    #             self.model_optim.zero_grad()
                 
-                origin_x = origin_x.to(self.device)
-                origin_y = origin_y.to(self.device)
-                batch_x = batch_x.to(self.device).float()
-                batch_y = batch_y.to(self.device).float()
-                batch_x_date_enc = batch_x_date_enc.to(self.device).float()
-                batch_y_date_enc = batch_y_date_enc.to(self.device).float()
+    #             origin_x = origin_x.to(self.device)
+    #             origin_y = origin_y.to(self.device)
+    #             batch_x = batch_x.to(self.device).float()
+    #             batch_y = batch_y.to(self.device).float()
+    #             batch_x_date_enc = batch_x_date_enc.to(self.device).float()
+    #             batch_y_date_enc = batch_y_date_enc.to(self.device).float()
 
                 
-                pred, true = self._process_train_batch(
-                    batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
-                )
-                if self.invtrans_loss:
-                    pred = self.scaler.inverse_transform(pred)
-                    true = origin_y
-                loss = self.loss_func(pred, true)
-                loss.backward()
+    #             pred, true = self._process_train_batch(
+    #                 batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
+    #             )
+    #             if self.invtrans_loss:
+    #                 pred = self.scaler.inverse_transform(pred)
+    #                 true = origin_y
+    #             loss = self.loss_func(pred, true)
+    #             loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.max_grad_norm
-                )
-                progress_bar.update(batch_x.size(0))
-                train_loss.append(loss.item())
-                progress_bar.set_postfix(
-                    loss=loss.item(),
-                    lr=self.model_optim.param_groups[0]["lr"],
-                    epoch=self.current_epoch,
-                    refresh=True,
-                )
-                self.model_optim.step()
+    #             torch.nn.utils.clip_grad_norm_(
+    #                 self.model.parameters(), self.max_grad_norm
+    #             )
+    #             progress_bar.update(batch_x.size(0))
+    #             train_loss.append(loss.item())
+    #             progress_bar.set_postfix(
+    #                 loss=loss.item(),
+    #                 lr=self.model_optim.param_groups[0]["lr"],
+    #                 epoch=self.current_epoch,
+    #                 refresh=True,
+    #             )
+    #             self.model_optim.step()
 
-            return train_loss
+    #         return train_loss
 
     def _check_run_exist(self, seed: str):
         if not os.path.exists(self.run_save_dir):

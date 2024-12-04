@@ -19,7 +19,7 @@ class CRPSSum(Metric):
         true = true.sum(dim=2)
         
 
-        pred = pred.view(-1, pred.size(2))  # Reshape to (B * O , S)
+        pred = pred.view(-1, pred.shape[2])  # Reshape to (B * O , S)
         true = true.view(-1)  # Reshape to (B * O,)
 
         
