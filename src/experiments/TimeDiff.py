@@ -171,6 +171,16 @@ class TimeDiffForecast(ProbForecastExp, TimeDiffParameters):
         # - pred: (B, N)/(B, O, N)
         # - label: (B, N)/(B, O, N)
         
+        # Time Diff need the batch_x to be a even number
+        def get_even(n):
+            n = n if n.shape[0]%2 == 0 else torch.concat([n, n[0:1, :, :]], dim=0)
+            return n
+        
+        batch_x = get_even(batch_x)
+        batch_y = get_even(batch_y)
+        batch_x_date_enc = get_even(batch_x_date_enc)
+        batch_y_date_enc = get_even(batch_y_date_enc)
+        
         dec_inp_pred = torch.zeros(
             [batch_x.size(0), self.pred_len, self.dataset.num_features]
         ).to(self.device)
@@ -206,7 +216,9 @@ class TimeDiffForecast(ProbForecastExp, TimeDiffParameters):
         )
 
         outs, x, y , _ , _ = self.model(batch_x, batch_x_date_enc, dec_inp, dec_inp_date_enc, None, None, None, self.num_samples)
-        return outs.permute(0, 2, 3, 1), batch_y
+        outs = outs.permute(0, 2, 3, 1)
+        assert (outs.shape[1], outs.shape[2], outs.shape[3]) == (self.pred_len, self.dataset.num_features, self.num_samples)
+        return outs, batch_y
 
 
 if __name__ == "__main__":

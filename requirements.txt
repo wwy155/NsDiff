@@ -6,3 +6,4 @@ distributions
 opt-einsum
 cmake
 pykeops 
+ema-pytorch

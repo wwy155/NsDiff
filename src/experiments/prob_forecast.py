@@ -44,6 +44,7 @@ def update_metrics(preds, truths, metrics):
 @dataclass
 class ProbForecastExp(ForecastExp):
     loss_func_type : str = 'mse'
+    epochs : int = 10
     
     def _init_metrics(self):
         self.metrics = MetricCollection(
@@ -178,7 +179,43 @@ class ProbForecastExp(ForecastExp):
 
         result = {name: float(metric.compute()) for name, metric in self.metrics.items()}
         return result
+    
+    
+    def _init_data_loader(self):
+        
+        self._init_dataset()
+        
+        self.scaler = parse_type(self.scaler_type, globals=globals())()
 
+        self.dataloader = SlidingWindowTS(
+            self.dataset,
+            self.scaler,
+            window=self.windows,
+            horizon=self.horizon,
+            steps=self.pred_len,
+            scale_in_train=True,
+            shuffle_train=True,
+            freq=self.dataset.freq,
+            batch_size=self.batch_size,
+            train_ratio=self.train_ratio,
+            test_ratio=self.test_ratio,
+            num_worker=self.num_worker,
+            fast_test=True,
+            fast_val=True,
+        )
+        self.train_loader, self.val_loader, self.test_loader = (
+            self.dataloader.train_loader,
+            self.dataloader.val_loader,
+            self.dataloader.test_loader,
+        )
+        self.train_steps = len(self.train_loader.dataset)
+        self.val_steps = len(self.val_loader.dataset)
+        self.test_steps = len(self.test_loader.dataset)
+
+        print(f"train steps: {self.train_steps}")
+        print(f"val steps: {self.val_steps}")
+        print(f"test steps: {self.test_steps}")
+        
 
     def _test(self) -> Dict[str, float]:
         print("Testing .... ")
@@ -351,7 +388,7 @@ class ProbForecastExp(ForecastExp):
             if self._use_wandb():
                 wandb.log({'training_loss' : np.mean(train_losses)}, step=self.current_epoch)
                 wandb.log( {f"val_{k}": v for k, v in val_result.items()}, step=self.current_epoch)
-                wandb.log( {f"test_{k}": v for k, v in test_result.items()}, step=self.current_epoch)
+                # wandb.log( {f"test_{k}": v for k, v in test_result.items()}, step=self.current_epoch)
 
             # self.scheduler.step()
 
