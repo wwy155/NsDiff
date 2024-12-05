@@ -94,27 +94,8 @@ class D3VAEForecast(ProbForecastExp, D3VAEParameters):
         
 
     def _init_data_loader(self):
+        super()._init_data_loader()
         
-        self._init_dataset()
-        
-        self.scaler = parse_type(self.scaler_type, globals=globals())()
-
-        self.dataloader = SlidingWindowTS(
-            self.dataset,
-            self.scaler,
-            window=self.windows,
-            horizon=self.horizon,
-            steps=self.pred_len,
-            scale_in_train=True,
-            shuffle_train=True,
-            freq=self.dataset.freq,
-            batch_size=self.batch_size,
-            train_ratio=self.train_ratio,
-            val_ratio=self.val_ratio,
-            num_worker=self.num_worker,
-        )
-
-
         if self.pred_len < self.windows:
             # train using same window and pred_length
             self.dataloader1 = SlidingWindowTS(
@@ -128,25 +109,14 @@ class D3VAEForecast(ProbForecastExp, D3VAEParameters):
                 freq=self.dataset.freq,
                 batch_size=self.batch_size,
                 train_ratio=self.train_ratio,
-                val_ratio=self.val_ratio,
+                test_ratio=self.test_ratio,
                 num_worker=self.num_worker,
+                fast_val=True,
+                fast_test=True
             )
             self.train_loader = self.dataloader1.train_loader
-        
-            self.val_loader, self.test_loader = (
-                self.dataloader.val_loader,
-                self.dataloader.test_loader,
-            )
 
-        else:
-            self.train_loader, self.val_loader, self.test_loader = (
-                self.dataloader.train_loader,
-                self.dataloader.val_loader,
-                self.dataloader.test_loader,
-            )
         self.train_steps = len(self.train_loader.dataset)
-        self.val_steps = len(self.val_loader.dataset)
-        self.test_steps = len(self.test_loader.dataset)
 
         print(f"train steps: {self.train_steps}")
         print(f"val steps: {self.val_steps}")

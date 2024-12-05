@@ -166,10 +166,9 @@ class ProbForecastExp(ForecastExp):
                 batch_y = batch_y.to(self.device).float()
                 batch_x_date_enc = batch_x_date_enc.to(self.device).float()
                 batch_y_date_enc = batch_y_date_enc.to(self.device).float()
-                with torch.no_grad():
-                    preds, truths = self._process_val_batch(
-                        batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
-                    )
+                preds, truths = self._process_val_batch(
+                    batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
+                )
                 origin_y = origin_y.to(self.device)
                 if self.invtrans_loss:
                     preds = self.scaler.inverse_transform(preds)

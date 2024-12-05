@@ -32,13 +32,13 @@ class DiffusionTSParameters:
     # beta_end: float =  0.5
     # num_steps: int =  100
     # vis_ar_part: int =  0
-    num_samples :int = 100
+    num_samples :int = 20
 
     n_layer_enc: int =3
     n_layer_dec: int =6
     d_model: int = 64
-    timesteps: int =100
-    sampling_timesteps: int = 100
+    timesteps: int = 500
+    sampling_timesteps: int = 200
     loss_type : str ='l1'
     beta_schedule: str ='cosine'
     n_heads: int =4
@@ -67,7 +67,7 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
             d_model=self.d_model,
             timesteps=self.timesteps,
             sampling_timesteps=self.sampling_timesteps,
-            loss_type='l1',
+            loss_type='l2',
             beta_schedule=self.beta_schedule,
             n_heads=self.n_heads,
             mlp_hidden_times=self.mlp_hidden_times,
@@ -80,13 +80,13 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
             reg_weight=self.reg_weight,
         )
         self.model = self.model.to(self.device)
-        self.ema = EMA(self.model, beta=self.decay, update_every=self.update_interval).to(self.device)
+        # self.ema = EMA(self.model, beta=self.decay, update_every=self.update_interval).to(self.device)
         self.gt_mask = torch.concat([
                 torch.ones(size=(self.windows, self.dataset.num_features)),
                 torch.zeros(size=(self.pred_len, self.dataset.num_features)),
             ]).to(self.device).bool()
         
-        # self.observation_mask = ~self.gt_mask
+        self.observation_mask = ~self.gt_mask
 
 
 
@@ -107,7 +107,6 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
                 batch_y = batch_y.to(self.device).float()
                 batch_x_date_enc = batch_x_date_enc.to(self.device).float()
                 batch_y_date_enc = batch_y_date_enc.to(self.device).float()
-                self.model_optim.zero_grad()
                 loss = self._process_train_batch(
                     batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
                 )
@@ -115,10 +114,11 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
                     pred = self.scaler.inverse_transform(pred)
                     true = origin_y
                 loss.backward()
+                
 
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.max_grad_norm
-                )
+                # torch.nn.utils.clip_grad_norm_(
+                #     self.model.parameters(), self.max_grad_norm
+                # )
                 
                 progress_bar.update(batch_x.size(0))
                 
@@ -130,6 +130,8 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
                     refresh=True,
                 )
                 self.model_optim.step()
+                self.model_optim.zero_grad()
+                
 
             return train_loss
 
@@ -151,7 +153,8 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
         #     [batch_x_date_enc[:, self.label_len :, :], batch_y_date_enc], dim=1
         # )
 
-        loss= self.model(torch.concat([batch_x, batch_y], dim=1))
+        data = torch.concat([batch_x, batch_y], dim=1)
+        loss= self.model(data, target=data)
         return loss
 
 
@@ -177,17 +180,23 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
         x = torch.concat([batch_x, batch_y], dim=1)
         B = x.shape[0] 
         # inpu_date =  torch.concat([batch_x_date_enc, batch_y_date_enc], dim=1)
+        
+        # t_m : 1 when target(predict), 0 when features
         t_m = self.gt_mask.expand((x.shape[0], -1, -1))
         
         x = x.repeat(self.num_samples, 1, 1)
         t_m = t_m.repeat(self.num_samples, 1, 1)
         
-        coef = 1.0e-2
-        stepsize = 5.0e-2
+        coef = 1e-1
+        stepsize = 5e-2
+        model_kwargs = {}
+        model_kwargs['coef'] = coef
+        model_kwargs['learning_rate'] = stepsize
+
         sampling_steps =  self.sampling_timesteps
 
         
-        shape = (self.pred_len, self.dataset.num_features)
+        # shape = (self.pred_len, self.dataset.num_features)
 
         # samples = np.empty([0, shape[0], shape[1]])
         # reals = np.empty([0, shape[0], shape[1]])
@@ -196,17 +205,16 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
         # for idx, (x, t_m) in enumerate(raw_dataloader):
             # x, t_m = x.to(self.device), t_m.to(self.device)
         
+        with torch.no_grad():
+            # this workd, sample_infill do not work....
+            sample = self.model.fast_sample_infill(shape=x.shape, target=x*t_m, partial_mask=t_m, model_kwargs=model_kwargs,
             
-        model_kwargs = {}
-        model_kwargs['coef'] = coef
-        model_kwargs['learning_rate'] = stepsize
-
-        if sampling_steps == self.model.num_timesteps:
-            sample = self.ema.ema_model.sample_infill(shape=x.shape, target=x*t_m, partial_mask=t_m,
-                                                        model_kwargs=model_kwargs)
-        else:
-            sample = self.ema.ema_model.fast_sample_infill(shape=x.shape, target=x*t_m, partial_mask=t_m, model_kwargs=model_kwargs,
-                                                            sampling_timesteps=sampling_steps)
+            # if sampling_steps == self.model.num_timesteps:
+            #     sample = self.model.sample_infill(shape=x.shape, target=x*t_m, partial_mask=t_m,
+            #                                                 model_kwargs=model_kwargs)
+            # else:
+            #     sample = self.model.fast_sample_infill(shape=x.shape, target=x*t_m, partial_mask=t_m, model_kwargs=model_kwargs,
+                                                                sampling_timesteps=sampling_steps)
             # samples = np.row_stack([samples, sample[:, -self.pred_len:, :].detach().cpu().numpy()])
             # reals = np.row_stack([reals, x.detach().cpu().numpy()])
             # masks = np.row_stack([masks, t_m.detach().cpu().numpy()])
@@ -215,6 +223,39 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
         assert (sample.shape[1], sample.shape[2], sample.shape[3]) == (self.pred_len, self.dataset.num_features, self.num_samples)
         return sample, batch_y
 
+
+    def _evaluate(self, dataloader):
+        self.model.eval()
+        self.metrics.reset()
+        results = []
+        with tqdm(total=len(dataloader.dataset)) as progress_bar:
+            for batch_x, batch_y, origin_x, origin_y, batch_x_date_enc, batch_y_date_enc in dataloader:
+                batch_size = batch_x.size(0)
+                origin_x = origin_x.to(self.device)
+                origin_y = origin_y.to(self.device)
+                batch_x = batch_x.to(self.device).float()
+                batch_y = batch_y.to(self.device).float()
+                batch_x_date_enc = batch_x_date_enc.to(self.device).float()
+                batch_y_date_enc = batch_y_date_enc.to(self.device).float()
+                preds, truths = self._process_val_batch(
+                    batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
+                )
+                origin_y = origin_y.to(self.device)
+                if self.invtrans_loss:
+                    preds = self.scaler.inverse_transform(preds)
+                    truths = origin_y
+                    
+                self.metrics.update(preds.contiguous().cpu().detach(), truths.contiguous().cpu().detach())
+                # if isinstance(preds, np.ndarray):
+                #     results.append(self.task_pool.apply_async(update_metrics, (preds, truths, self.metrics)))
+                # else:
+                progress_bar.update(batch_x.shape[0])
+
+        # for result in results:
+        #     result.get()  # Ensure the metric update is finished
+
+        result = {name: float(metric.compute()) for name, metric in self.metrics.items()}
+        return result
 
 if __name__ == "__main__":
     import fire

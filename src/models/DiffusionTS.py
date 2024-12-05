@@ -379,14 +379,14 @@ class Diffusion_TS(nn.Module):
         else:
             K = 1
             learning_rate = learning_rate * 0.25
-
+            
         input_embs_param = torch.nn.Parameter(sample)
-
+        
         with torch.enable_grad():
             for i in range(K):
                 optimizer = torch.optim.Adagrad([input_embs_param], lr=learning_rate)
                 optimizer.zero_grad()
-
+                
                 x_start = self.output(x=input_embs_param, t=t)
 
                 if sigma.mean() == 0:
@@ -397,7 +397,6 @@ class Diffusion_TS(nn.Module):
                     logp_term = coef * ((mean - input_embs_param)**2 / sigma).mean(dim=0).sum()
                     infill_loss = (x_start[partial_mask] - tgt_embs[partial_mask]) ** 2
                     infill_loss = (infill_loss/sigma.mean()).mean(dim=0).sum()
-            
                 loss = logp_term + infill_loss
                 loss.backward()
                 optimizer.step()

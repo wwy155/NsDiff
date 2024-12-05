@@ -107,7 +107,6 @@ class TimeDiff(nn.Module):
             x_enc_i = x_enc
             x_dec_i = x_dec
             linear_outputs_i = linear_outputs
-
         x_past = x_enc_i
         x_future = x_dec_i[:,-self.args.pred_len:,:] # - linear_outputs_i
 
