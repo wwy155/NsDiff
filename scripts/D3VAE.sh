@@ -5,7 +5,6 @@ python3 ./src/experiments/D3VAE.py \
    --device="cuda:0" \
    --batch_size=20 \
    --horizon=1 \
-   --pred_len=24 \
+   --pred_len=48 \
    --windows=48 \
-   --epochs=100   \
    runs --seeds='[2]'

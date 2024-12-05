@@ -1,7 +1,7 @@
 export PYTHONPATH=./
 export PYTHONPATH=/notebooks/pytorchtimseries:./
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
-python3 ./src/experiments/DiffusionTS.py \
+python3 ./src/experiments/DiffusionTS_nonoverlap.py \
    --dataset_type="SolarEnergy" \
    --device="cuda:0" \
    --batch_size=32 \

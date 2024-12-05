@@ -24,3 +24,14 @@ with torch.no_grad():
     Q = P.conj() if self.Q is None else _r2c(self.Q)
     w = self._w()
 ```
+
+
+## DiffusionTS:
+
+the original version split datset in non-overlap settings, and the split scheme has to follow some prior knowledge of the time, e.g. one week 168 step to predict next day. However, in our settings, the training dataset slide in 1 step rather than window+pred steps.
+
+We do oberserve a peformance decline in this version; however, the consistent setting make sure the experiment is justified. We provide a previous version code for you to run: experiments/DiffusionTS_nonoverlap.py
+
+
+
+

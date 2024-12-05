@@ -1,11 +1,11 @@
 export PYTHONPATH=./
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
 python3 ./src/experiments/CSDI.py \
-   --dataset_type="Electricity" \
+   --dataset_type="ExchangeRate" \
    --device="cuda:0" \
    --batch_size=32 \
    --horizon=1 \
-   --pred_len=12 \
-   --windows=12 \
+   --pred_len=48 \
+   --windows=48 \
    --epochs=100   \
    runs --seeds='[3]'
