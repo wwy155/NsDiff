@@ -626,8 +626,6 @@ class SSKernelNPLR(nn.Module):
             rate = self.L / L
         if L is None:
             L = int(self.L / rate)
-        with torch.no_grad():
-
             # Increase the internal length if needed
             while rate * L > self.L:
                 self.double_length()

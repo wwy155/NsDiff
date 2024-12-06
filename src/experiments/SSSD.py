@@ -7,6 +7,7 @@ import torch
 from dataclasses import dataclass, asdict, field
 from torch_timeseries.nn.embedding import freq_map
 from src.models.SSSD import SSSDSAImputer, calc_diffusion_hyperparams
+from src.nn.SSSDS4Imputer import SSSDS4Imputer
 from src.experiments.prob_forecast import ProbForecastExp
 from torchmetrics import MeanAbsoluteError, MeanSquaredError, MetricCollection
 from tqdm import tqdm
@@ -34,10 +35,9 @@ def std_normal(size):
 @dataclass
 class SSSDParameters:
     beta_start: float =  0.0001
-    beta_end: float =  0.5
-    num_steps: int =  20
+    beta_end: float =  0.02
+    num_steps: int =  200
     num_samples: int =  100
-   
     d_model: int=128 
     n_layers: int=6 
     pool: List[int] = field(default_factory=lambda : [2, 2])
@@ -45,18 +45,17 @@ class SSSDParameters:
     ff: int= 2 
     glu: bool=True
     unet: bool=True 
-    dropout: float =0.1
-    in_channels: int=1
-    out_channels: int=1
+    dropout: float =0.02
     diffusion_step_embed_dim_in: int=128 
     diffusion_step_embed_dim_mid: int=512
     diffusion_step_embed_dim_out: int=512
     label_embed_dim: int = 128
     label_embed_classes: int = 71
     bidirectional: bool=True
-    s4_lmax: int=1
+    s4_lmax: int= 1000
     s4_d_state: int=64
-    s4_dropout: float=0.0
+    s4_dropout: float=0.00
+    only_generate_missing : int = 1
     s4_bidirectional: bool=True
 
 
@@ -85,8 +84,49 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
             s4_d_state=self.s4_d_state,
             s4_dropout=self.s4_dropout,
             s4_bidirectional=self.s4_bidirectional,
-
         )
+        
+        # self.model = SSSDS4Imputer(
+        #     in_channels=self.dataset.num_features,
+        #     out_channels=self.dataset.num_features,
+        #     num_res_layers=36,
+        #     res_channels=256,
+        #     skip_channels=256,
+        #     diffusion_step_embed_dim_in=self.diffusion_step_embed_dim_in, 
+        #     diffusion_step_embed_dim_mid=self.diffusion_step_embed_dim_mid,
+        #     diffusion_step_embed_dim_out=self.diffusion_step_embed_dim_out,
+        #     s4_lmax=self.s4_lmax,
+        #     s4_d_state=self.s4_d_state,
+        #     s4_dropout=self.s4_dropout,
+        #     s4_bidirectional=self.s4_bidirectional,
+        #     s4_layernorm=1
+        # )
+        
+        # self.model = SSSDSAImputer(
+        #     d_model=self.d_model,
+        #     n_layers=self.n_layers,
+        #     pool=self.pool,
+        #     expand=self.expand,
+        #     ff=self.ff,
+        #     glu=self.glu,
+        #     unet=self.unet,
+        #     dropout=self.dropout,
+        #     in_channels=self.dataset.num_features,
+        #     out_channels=self.dataset.num_features,
+        #     diffusion_step_embed_dim_in=self.diffusion_step_embed_dim_in, 
+        #     diffusion_step_embed_dim_mid=self.diffusion_step_embed_dim_mid,
+        #     diffusion_step_embed_dim_out=self.diffusion_step_embed_dim_out,
+        #     label_embed_dim=self.label_embed_dim,
+        #     label_embed_classes=self.label_embed_classes,
+        #     bidirectional=self.bidirectional,
+        #     s4_lmax=self.s4_lmax,
+        #     s4_d_state=self.s4_d_state,
+        #     s4_dropout=self.s4_dropout,
+        #     s4_bidirectional=self.s4_bidirectional,
+        # )
+
+        
+        
         self.model = self.model.to(self.device)
         
         self.diffu_params = calc_diffusion_hyperparams(self.num_steps, self.beta_start, self.beta_end)
@@ -127,20 +167,18 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
         diffusion_steps = torch.randint(T, size=(B, 1, 1)).to(self.device).long()  # randomly sample diffusion steps from 1~T
 
         z = std_normal(audio.shape)
-        # if only_generate_missing == 1:
-        #     z = audio * mask.float() + z * (1 - mask).float()
+        if self.only_generate_missing == 1:
+            z = audio * mask.float() + z * (1 - mask.float()).float()
         transformed_X = torch.sqrt(Alpha_bar[diffusion_steps]) * audio + torch.sqrt(
             1 - Alpha_bar[diffusion_steps]) * z  # compute x_t from q(x_t|x_0)
         epsilon_theta = self.model(
             (transformed_X, cond, mask, diffusion_steps.view(B, 1),))  # predict \epsilon according to \epsilon_\theta
 
 
-
         # if only_generate_missing == 1:
         # return loss_fn(epsilon_theta[loss_mask], z[loss_mask])
         # elif only_generate_missing == 0:
         #     return loss_fn(epsilon_theta, z)
-
         return epsilon_theta[loss_mask], z[loss_mask]
         
         # pred = self.model(batch_input).transpose(1,2) # B, L+O,N
@@ -177,8 +215,8 @@ class SSSDSForecast(ProbForecastExp, SSSDParameters):
 
         with torch.no_grad():
             for t in range(T - 1, -1, -1):
-                # if only_generate_missing == 1:
-                #     x = x * (1 - mask).float() + cond * mask.float()
+                if self.only_generate_missing == 1:
+                    x = x * (1 - mask.float()).float() + cond * mask.float()
                 diffusion_steps = (t * torch.ones((size[0], 1))).cuda()  # use the corresponding reverse step
                 epsilon_theta = self.model((x, cond, mask, diffusion_steps,))  # predict \epsilon according to \epsilon_\theta
                 # update x_{t-1} to \mu_\theta(x_t)

@@ -33,12 +33,9 @@ def default(val, d):
 
 
 def extract(a, t, x_shape):
-    b = t.shape[0]
-    out = a.gather(0, t)  # Gather along the first axis
-    return out.view(b, *((1,) * (len(x_shape) - 1)))  # Reshape the output tensor
-    # b, *_ = t.shape
-    # out = torch.fluid.layers.gather(a, t)
-    # return out.reshape((b, *((1,) * (len(x_shape) - 1))))
+    b, *_ = t.shape
+    out = a.gather(0, t)
+    return out.reshape((b, *((1,) * (len(x_shape) - 1))))
 
 
 def noise_like(shape, device, repeat=False):
@@ -50,29 +47,26 @@ def noise_like(shape, device, repeat=False):
 
 
 class GaussianDiffusion(nn.Module):
-    def __init__(self, bvae, beta_start=0, beta_end=0.1, diff_steps=100,
-        betas=None, scale = 0.1, beta_schedule="linear",):
+    def __init__(self, bvae, beta_start=0, beta_end=0.1, diff_steps=100, 
+                 betas=None, scale=0.1, beta_schedule="linear"):
         super().__init__()
         """
         Params:
-           bave: The bidirectional vae model.
+           bvae: The bidirectional VAE model.
            beta_start: The start value of the beta schedule.
            beta_end: The end value of the beta schedule.
-           beta_schedule: the kind of the beta schedule, here are fixed to linear, you can adjust it as needed.
+           beta_schedule: The kind of beta schedule; fixed to linear but can be adjusted.
            diff_steps: The maximum diffusion steps.
-           scale: scale parameters for the target time series.
+           scale: Scale parameter for the target time series.
         """
         self.generative = bvae
-       
-        # The diffusion schedule for input.
         self.scale = scale
         self.beta_start = beta_start
         self.beta_end = beta_end
         betas = get_beta_schedule(beta_schedule, beta_start, beta_end, diff_steps)
         alphas = 1.0 - betas
         alphas_cumprod = np.cumprod(alphas, axis=0)
-       
-        # The diffusion schedule for target.
+        # The diffusion schedule for the target
         alphas_target = 1.0 - betas*scale
         alphas_target_cumprod = np.cumprod(alphas_target, axis=0)
         self.alphas_target = alphas_target
@@ -80,20 +74,16 @@ class GaussianDiffusion(nn.Module):
         
         (timesteps,) = betas.shape
         self.num_timesteps = int(timesteps)
-        
-       
-        to_paddle = partial(torch.tensor, dtype=torch.float32)
-       
-        self.register_buffer("betas", to_paddle(betas))
-        self.register_buffer("alphas_cumprod", to_paddle(alphas_cumprod))
-        
-        self.register_buffer("sqrt_alphas_cumprod", to_paddle(np.sqrt(alphas_cumprod)))
-        self.register_buffer("sqrt_alphas_target_cumprod", to_paddle(np.sqrt(alphas_target_cumprod)))
+        to_torch = partial(torch.tensor, dtype=torch.float32)
+        self.register_buffer("betas", to_torch(betas))
+        self.register_buffer("alphas_cumprod", to_torch(alphas_cumprod))
+        self.register_buffer("sqrt_alphas_cumprod", to_torch(np.sqrt(alphas_cumprod)))
+        self.register_buffer("sqrt_alphas_target_cumprod", to_torch(np.sqrt(alphas_target_cumprod)))
         self.register_buffer(
-            "sqrt_one_minus_alphas_cumprod", to_paddle(np.sqrt(1.0 - alphas_cumprod))
+            "sqrt_one_minus_alphas_cumprod", to_torch(np.sqrt(1.0 - alphas_cumprod))
         )
         self.register_buffer(
-            "sqrt_one_minus_alphas_target_cumprod", to_paddle(np.sqrt(1.0 - alphas_target_cumprod))
+            "sqrt_one_minus_alphas_target_cumprod", to_torch(np.sqrt(1.0 - alphas_target_cumprod))
         )
 
     def q_sample(self, x_start, t, noise=None):
@@ -135,7 +125,6 @@ class GaussianDiffusion(nn.Module):
             :return total_c: the total correlations of latent variables in BVAE.
             :return all_z: all latent variables of BVAE.
         """
-        
         B, T, _ = x_start.shape
         B1, T1, _ = y_target.shape
         x_start = x_start.reshape([B, 1, T, -1])

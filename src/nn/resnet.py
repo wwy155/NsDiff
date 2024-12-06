@@ -3,27 +3,28 @@
 Authors:
     Li,Yan (liyan22021121@gmail.com)
 """
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 def weights_init(m):
     classname = m.__class__.__name__
-    if classname.find("Conv") != -1:
-        m.weight.data.normal_(0.0, 0.2)
-    elif classname.find("BatchNorm") != -1:
-        m.weight.data.normal_(1.0, 0.2)
-        m.bias.data.fill_(0)
+    if "Conv" in classname:
+        nn.init.normal_(m.weight, mean=0.0, std=0.2)
+    elif "BatchNorm" in classname:
+        nn.init.normal_(m.weight, mean=1.0, std=0.2)
+        nn.init.constant_(m.bias, 0)
 
 
 class MyConvo2d(nn.Module):
-    def __init__(self, input_dim, output_dim, kernel_size,  stride = 1, bias = True):
+    def __init__(self, input_dim, output_dim, kernel_size, stride=1, bias=True):
         super(MyConvo2d, self).__init__()
-        self.padding = int((kernel_size - 1)/2)
-        self.conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=self.padding)
-        
+        self.padding = (kernel_size - 1) // 2
+        self.conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=stride, padding=self.padding, bias=bias)
+
     def forward(self, input):
-        output = self.conv(input)
-        return output
+        return self.conv(input)
 
 
 class Square(nn.Module):
@@ -36,12 +37,8 @@ class Square(nn.Module):
 
 
 class Swish(nn.Module):
-    def __init__(self):
-        super(Swish,self).__init__()
-        pass
-    
-    def forward(self,in_vect):
-        return in_vect*nn.functional.sigmoid(in_vect)
+    def forward(self, input):
+        return input * torch.sigmoid(input)
 
 
 class MeanPoolConv(nn.Module):
@@ -50,9 +47,7 @@ class MeanPoolConv(nn.Module):
         self.conv = MyConvo2d(input_dim, output_dim, kernel_size)
 
     def forward(self, input):
-        output = input
-        output = self.conv(output)
-        return output
+        return self.conv(input)
 
 
 class ConvMeanPool(nn.Module):
@@ -61,14 +56,12 @@ class ConvMeanPool(nn.Module):
         self.conv = MyConvo2d(input_dim, output_dim, kernel_size)
 
     def forward(self, input):
-        output = self.conv(input)
-        return output
+        return self.conv(input)
 
 
 class ResidualBlock(nn.Module):
-    def __init__(self, input_dim, output_dim, kernel_size, hw, resample=None, normalize=False,AF=nn.ELU()):
+    def __init__(self, input_dim, output_dim, kernel_size, hw, resample=None, normalize=False, AF=nn.ELU()):
         super(ResidualBlock, self).__init__()
-
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.kernel_size = kernel_size
@@ -107,8 +100,7 @@ class ResidualBlock(nn.Module):
             output = self.relu2(output)
             output = self.conv_2(output)
         else:
-            output = input
-            output = self.bn1(output)
+            output = self.bn1(input)
             output = self.relu1(output)
             output = self.conv_1(output)
             output = self.bn2(output)
@@ -116,12 +108,10 @@ class ResidualBlock(nn.Module):
             output = self.conv_2(output)
 
         return shortcut + output
-
-
 class Res12_Quadratic(nn.Module):
-    def __init__(self, inchan, dim, hw, normalize=False,AF=None):
+    def __init__(self, inchan, dim, hw, normalize=False, AF=None):
         super(Res12_Quadratic, self).__init__()
-        
+
         self.hw = hw
         self.dim = dim
         self.inchan = inchan
@@ -136,11 +126,9 @@ class Res12_Quadratic(nn.Module):
         self.ln2 = nn.Linear(int(hw/8)*int(hw/8)*8*dim, 1)
         self.lq = nn.Linear(int(hw/8)*int(hw/8)*8*dim, 1)
         self.Square = Square()
-                
+
     def forward(self, x_in):
-        output = x_in
-        output = self.conv1(output)
-        #print(output.shape)
+        output = self.conv1(x_in)
         output = self.rb1(output)
         output = self.rbc1(output)
         output = self.rb2(output)

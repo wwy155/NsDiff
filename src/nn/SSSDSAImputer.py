@@ -2,41 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from src.nn.s4model import S4, LinearActivation
-import numpy as np
-
-
-def calc_diffusion_hyperparams(T, beta_0, beta_T):
-    """
-    Compute diffusion process hyperparameters
-
-    Parameters:
-    T (int):                    number of diffusion steps
-    beta_0 and beta_T (float):  beta schedule start/end value, 
-                                where any beta_t in the middle is linearly interpolated
-    
-    Returns:
-    a dictionary of diffusion hyperparameters including:
-        T (int), Beta/Alpha/Alpha_bar/Sigma (torch.tensor on cpu, shape=(T, ))
-        These cpu tensors are changed to cuda tensors on each individual gpu
-    """
-
-    Beta = torch.linspace(beta_0, beta_T, T)  # Linear schedule
-    Alpha = 1 - Beta
-    Alpha_bar = Alpha + 0
-    Beta_tilde = Beta + 0
-    for t in range(1, T):
-        Alpha_bar[t] *= Alpha_bar[t - 1]  # \bar{\alpha}_t = \prod_{s=1}^t \alpha_s
-        Beta_tilde[t] *= (1 - Alpha_bar[t - 1]) / (
-                1 - Alpha_bar[t])  # \tilde{\beta}_t = \beta_t * (1-\bar{\alpha}_{t-1})
-        # / (1-\bar{\alpha}_t)
-    Sigma = torch.sqrt(Beta_tilde)  # \sigma_t^2  = \tilde{\beta}_t
-
-    _dh = {}
-    _dh["T"], _dh["Beta"], _dh["Alpha"], _dh["Alpha_bar"], _dh["Sigma"] = T, Beta, Alpha, Alpha_bar, Sigma
-    diffusion_hyperparams = _dh
-    return diffusion_hyperparams
-
+from .s4model import S4, LinearActivation
 
 def calc_diffusion_step_embedding(diffusion_steps, diffusion_step_embed_dim_in):
     """
@@ -254,16 +220,19 @@ class ResidualBlock(nn.Module):
         Input x is shape (B, d_input, L)
         """
         x, cond, diffusion_step_embed = input_data
+        
         # add in diffusion step embedding
         part_t = self.fc_t(diffusion_step_embed).unsqueeze(2)
         z = x + part_t
+        
         # Prenorm
         z = self.norm(z.transpose(-1, -2)).transpose(-1, -2)
+        
         z,_ = self.layer(z) 
-            
+        
         cond = self.cond_conv(cond)
         #cond = self.fc_label(cond)
-    
+      
     
         z = z + cond
             
@@ -454,8 +423,12 @@ class SSSDSAImputer(nn.Module):
         #audio_cond: same shape as audio, audio_mask: same shape as audio but binary to be imputed where zero
         noise, conditional, mask, diffusion_steps = input_data 
         
+        
         conditional = conditional * mask       
         conditional = torch.cat([conditional, mask.float()],dim=1)  
+        
+  
+        
                 
         diffusion_step_embed = calc_diffusion_step_embedding(diffusion_steps, self.diffusion_step_embed_dim_in)
         diffusion_step_embed = swish(self.fc_t1(diffusion_step_embed))
@@ -463,9 +436,9 @@ class SSSDSAImputer(nn.Module):
                 
 
         x = noise        
-        x = self.init_conv(x)  
+        x = self.init_conv(x)   
         
-         
+
         # Down blocks
         outputs = []
         outputs.append(x)
@@ -475,6 +448,7 @@ class SSSDSAImputer(nn.Module):
             else:
                 x = layer(x)
             outputs.append(x)
+            
         # Center block
         for layer in self.c_layers:
             if isinstance(layer, ResidualBlock):
@@ -482,14 +456,13 @@ class SSSDSAImputer(nn.Module):
             else:
                 x = layer(x)
         x = x + outputs.pop() # add a skip connection to the last output of the down block
-   
+
         # Up blocks
         for block in self.u_layers:
             if self.unet:
                 for layer in block:
-                    if isinstance(layer, ResidualBlock): 
-                        # computing gradient will lead to nan, not yet know why https://github.com/state-spaces/s4/issues/138
-                        x = layer((x,conditional,diffusion_step_embed)) 
+                    if isinstance(layer, ResidualBlock):
+                        x = layer((x,conditional,diffusion_step_embed))
                     else:
                         x = layer(x)
                     x = x + outputs.pop() # skip connection
@@ -509,7 +482,7 @@ class SSSDSAImputer(nn.Module):
         x = x.transpose(1, 2) # (batch, length, expand)
         x = self.norm(x).transpose(1,2) # (batch, expand, length) 
         
-        x = self.final_conv(x) # 128 to 12  # (B, N, length) 
+        x = self.final_conv(x) # 128 to 12
         return x 
 
     def default_state(self, *args, **kwargs):

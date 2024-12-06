@@ -39,7 +39,7 @@ class QICE(Metric):
         y_true_quantile_bin_count = np.array(
             [(y_true_quantile_membership == v).sum() for v in np.arange(self.n_bins + 2)]  # Shape (n_bins+2,)
         )
-        
+        print(y_true_quantile_bin_count)
         # Combine outliers into the first and last bins
         y_true_quantile_bin_count[1] += y_true_quantile_bin_count[0]
         y_true_quantile_bin_count[-2] += y_true_quantile_bin_count[-1]

@@ -4,7 +4,6 @@ from typing import List, Dict
 import os
 
 import torch
-from src.experiments.forecast import ForecastExp 
 from dataclasses import dataclass, asdict, field
 from torch_timeseries.nn.embedding import freq_map
 from src.models.TimeGrad import TimeGrad
@@ -31,8 +30,8 @@ class TimeGradParameters:
     rnn_hidden_size : int = 40
     rnn_type : str = 'LSTM'
     dropout_rate : float = 0.1
-    lags_seq : List[int] = field(default_factory= lambda : [1, 24, 168])
-    diff_steps : int = 20
+    lags_seq : List[int] = field(default_factory= lambda : [1, 24, 144])
+    diff_steps : int = 100
     beta_end : float = 0.1
     beta_schedule : str = 'linear'
     residual_layers : int = 8

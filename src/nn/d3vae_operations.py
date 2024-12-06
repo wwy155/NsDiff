@@ -9,6 +9,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from collections import OrderedDict
 
 BN_EPS = 1e-5
@@ -173,10 +174,11 @@ class Swish(nn.Module):
 
 
 def normalize_weight_jit(log_weight_norm, weight):
-    # Assuming you have an implementation for normalize_weight_jit
-    # This function normalizes the weights based on log_weight_norm.
-    norm = torch.norm(weight, p=2, dim=[1, 2, 3], keepdim=True)  # This may depend on the dimensions
-    return weight / (norm + 1e-2)
+    n = torch.exp(log_weight_norm)
+    wn = torch.sqrt(torch.sum(weight * weight, [1, 2, 3]))   # norm(w)
+    weight = n * weight / (wn.reshape((-1, 1, 1, 1)) + 1e-5)
+    return weight
+
 
 class Conv2D(nn.Conv2d):
     """Allows for weights as input."""
@@ -192,7 +194,7 @@ class Conv2D(nn.Conv2d):
         self.log_weight_norm = None
         if weight_norm:
             init = torch.norm(self.weight, p=2, dim=[1, 2, 3], keepdim=True)
-            self.log_weight_norm = torch.log(init + 1e-2)
+            self.log_weight_norm = nn.Parameter(torch.log(init + 1e-2), requires_grad=True)
 
         self.data_init = data_init
         self.init_done = False

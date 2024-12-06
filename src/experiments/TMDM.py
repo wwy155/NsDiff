@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import sys
 from typing import List, Dict
 import os
-
+import wandb
 import torch
 from dataclasses import dataclass, asdict, field
 from torch_timeseries.nn.embedding import freq_map
@@ -94,7 +94,7 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
     model_type: str = "TMDM"
     def _init_model(self):
         
-        self.label_len = self.pred_len // 2
+        self.label_len = self.windows // 2
         args_dict = {
             "seq_len": self.windows,
             "device": self.device,
@@ -153,8 +153,9 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
         self.model_optim = parse_type(self.optm_type, globals=globals())(
             [{'params': self.model.parameters()}, {'params': self.cond_pred_model.parameters()}], 
             lr=self.lr, 
-            weight_decay=self.l2_weight_decay
+            # weight_decay=self.l2_weight_decay
         )
+
 
     def _load_best_model(self):
         self.model.load_state_dict(
@@ -165,9 +166,16 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
         )
 
     def _setup_early_stopper(self):
+        self.best_checkpoint_filepath = os.path.join(
+            self.run_save_dir, "model.pth"
+        )
+        self.best_cond_checkpoint_filepath = os.path.join(
+            self.run_save_dir, "cond_pred_model.pth"
+        )
         self.early_stopper = TMDMEarlyStopping(
             self.patience, verbose=True, path=self.run_save_dir
         )
+
 
     def _save_run_check_point(self, seed):
 
@@ -211,8 +219,10 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
         self.early_stopper.set_state(check_point["early_stopping"])
 
     def _train(self):
+        self.model.train()
+        self.cond_pred_model.train()
+
         with torch.enable_grad(), tqdm(total=len(self.train_loader.dataset)) as progress_bar:
-            self.model.train()
             train_loss = []
             for i, (
                 batch_x,
@@ -227,7 +237,6 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
                 batch_y = batch_y.to(self.device).float()
                 batch_x_date_enc = batch_x_date_enc.to(self.device).float()
                 batch_y_date_enc = batch_y_date_enc.to(self.device).float()
-                self.model_optim.zero_grad()
                 loss = self._process_train_batch(
                     batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
                 )
@@ -246,8 +255,12 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
                     refresh=True,
                 )
                 self.model_optim.step()
+                self.model_optim.zero_grad()
+                
 
-            return train_loss
+        self.model.eval()
+        self.cond_pred_model.eval()
+        return train_loss
 
     def _process_train_batch(self, batch_x, batch_y, batch_x_mark, batch_y_mark):
         # inputs:
@@ -260,31 +273,29 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
         # Time Diff need the batch_x to be a even number
         
         
-        dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-        dec_inp = torch.cat([batch_y[:, :self.label_len, :], dec_inp], dim=1).float().to(self.device)
+        # dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+        # dec_inp = torch.cat([batch_x[:, -self.label_len:, :], dec_inp], dim=1).float().to(self.device)
 
-        # dec_inp_pred = torch.zeros(
-        #     [batch_x.size(0), self.pred_len, self.dataset.num_features]
-        # ).to(self.device)
-        # dec_inp_label = batch_x[:, -self.label_len :, :].to(self.device)
+        batch_y = torch.concat([batch_x[:, -self.label_len:, :], batch_y], dim=1)
+        batch_y_mark = torch.concat([batch_x_mark[:, -self.label_len:, :], batch_y_mark], dim=1)
 
-        # dec_inp = torch.cat([dec_inp_label, dec_inp_pred], dim=1)
-        # dec_inp_date_enc = torch.cat(
-        #     [batch_x_mark[:,-self.label_len:, :], batch_y_mark], dim=1
-        # )
+        dec_inp_pred = torch.zeros(
+            [batch_x.size(0), self.pred_len, self.dataset.num_features]
+        ).to(self.device)
+        dec_inp_label = batch_x[:, -self.label_len :, :].to(self.device)
 
+        dec_inp = torch.cat([dec_inp_label, dec_inp_pred], dim=1)
+        
 
         n = batch_x.size(0)
         t = torch.randint(
             low=0, high=self.model.num_timesteps, size=(n // 2 + 1,)
         ).to(self.device)
         t = torch.cat([t, self.model.num_timesteps - 1 - t], dim=0)[:n]
-
-        y_0_hat_batch, _, KL_loss, z_sample = self.cond_pred_model(batch_x, batch_x_mark, dec_inp,
-                                                                torch.concat([batch_x_mark[:, -self.label_len:, :], batch_y_mark], dim=1))
+        _, y_0_hat_batch, KL_loss, z_sample = self.cond_pred_model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
         loss_vae = log_normal(batch_y, y_0_hat_batch, torch.from_numpy(np.array(1)))
 
-        loss_vae_all = loss_vae + self.args.k_z * KL_loss
+        loss_vae_all = loss_vae + self.k_z * KL_loss
         # y_0_hat_batch = z_sample
 
         y_T_mean = y_0_hat_batch
@@ -294,7 +305,6 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
                                 self.model.one_minus_alphas_bar_sqrt, t, noise=e)
 
         output = self.model(batch_x, batch_x_mark, batch_y, y_t_batch, y_0_hat_batch, t)
-
         # loss = (e[:, -self.args.pred_len:, :] - output[:, -self.args.pred_len:, :]).square().mean()
         loss = (e - output).square().mean() + self.args.k_cond*loss_vae_all
         return loss
@@ -313,6 +323,16 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
         gen_y_by_batch_list = [[] for _ in range(self.diffusion_steps + 1)]
         y_se_by_batch_list = [[] for _ in range(self.diffusion_steps + 1)]
         minisample = 10
+        
+        batch_y = torch.concat([batch_x[:, -self.label_len:, :], batch_y], dim=1)
+        batch_y_mark = torch.concat([batch_x_mark[:, -self.label_len:, :], batch_y_mark], dim=1)
+
+        dec_inp_pred = torch.zeros(
+            [batch_x.size(0), self.pred_len, self.dataset.num_features]
+        ).to(self.device)
+        dec_inp_label = batch_x[:, -self.label_len :, :].to(self.device)
+        dec_inp = torch.cat([dec_inp_label, dec_inp_pred], dim=1)
+
 
         def store_gen_y_at_step_t(config, config_diff, idx, y_tile_seq):
             """
@@ -333,8 +353,8 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
             return gen_y
 
 
-        dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-        dec_inp = torch.cat([batch_y[:, :self.label_len, :], dec_inp], dim=1).float().to(self.device)
+        # dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+        # dec_inp = torch.cat([batch_y[:, :self.label_len, :], dec_inp], dim=1).float().to(self.device)
 
         n = batch_x.size(0)
         t = torch.randint(
@@ -342,8 +362,7 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
         ).to(self.device)
         t = torch.cat([t, self.model.num_timesteps - 1 - t], dim=0)[:n]
         
-        _, y_0_hat_batch, _, z_sample = self.cond_pred_model(batch_x, batch_x_mark, dec_inp,
-                                    torch.concat([batch_x_mark[:, -self.label_len:, :], batch_y_mark], dim=1))
+        _, y_0_hat_batch, _, z_sample = self.cond_pred_model(batch_x, batch_x_mark, dec_inp,batch_y_mark)
         preds = []
         for i in range(self.model.diffusion_config.testing.n_z_samples //minisample):
             repeat_n = int(minisample)
@@ -369,13 +388,16 @@ class TMDMForecast(ProbForecastExp, TMDMParameters):
             outputs = torch.concat(gen_y_box, dim=1)
 
             f_dim = -1 if self.args.features == 'MS' else 0
-            outputs = outputs[:, :, -self.args.pred_len:, f_dim:] # B, S, O, N
+            
+            outputs = outputs[:, :, -self.pred_len:, f_dim:] # B, S, O, N
 
             pred = outputs  # outputs.detach().cpu().numpy()  # .squeeze()
 
             preds.append(pred) # numberof_testbatch,  B, S, O, N
             # trues.append(true) # numberof_testbatch, B, T, N
         preds = torch.concat(preds, dim=1)
+        batch_y = batch_y[:, -self.pred_len:, f_dim:].to(self.device) # B, T, N
+
         outs = preds.permute(0, 2, 3, 1)
         assert (outs.shape[1], outs.shape[2], outs.shape[3]) == (self.pred_len, self.dataset.num_features, self.model.diffusion_config.testing.n_z_samples)
         return outs, batch_y

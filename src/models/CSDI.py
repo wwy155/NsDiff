@@ -637,7 +637,7 @@ class CSDI_Forecasting(CSDI_base):
             side_info = self.get_side_info(observed_tp, cond_mask)
             
             samples = []
-            for i in range(0, n_samples+minib_n_sample, minib_n_sample):
+            for i in range(0, n_samples, minib_n_sample):
                 sub_samples = self.impute(observed_data, cond_mask, side_info, minib_n_sample)
                 samples.append(sub_samples)
             samples = torch.concat(samples, dim=1)

@@ -11,9 +11,8 @@ import sys
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.distributed as dist
-import torch.nn.functional as F
-# from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
+from torch.distributed import all_reduce, ReduceOp
 
 
 class AvgrageMeter(object):
@@ -58,99 +57,85 @@ def count_parameters_in_M(model):
     return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name)/1e6
 
 
-def save_checkpoint(state, is_best, save):
-    filename = os.path.join(save, 'checkpoint.pth.tar')
-    torch.save(state, filename)
+def save_checkpoint(state, is_best, save_dir):
+    filepath = os.path.join(save_dir, 'checkpoint.pth.tar')
+    torch.save(state, filepath)
     if is_best:
-        best_filename = os.path.join(save, 'model_best.pth.tar')
-        shutil.copyfile(filename, best_filename)
+        shutil.copyfile(filepath, os.path.join(save_dir, 'model_best.pth.tar'))
 
 
-def save(model, model_path):
+def save_model(model, model_path):
     torch.save(model.state_dict(), model_path)
 
 
-def load(model, model_path):
+def load_model(model, model_path):
     model.load_state_dict(torch.load(model_path))
 
 
 def create_exp_dir(path, scripts_to_save=None):
-    if not os.path.exists(path):
-        os.makedirs(path, exist_ok=True)
-    print('Experiment dir : {}'.format(path))
-
-    if scripts_to_save is not None:
-        if not os.path.exists(os.path.join(path, 'scripts')):
-            os.mkdir(os.path.join(path, 'scripts'))
+    os.makedirs(path, exist_ok=True)
+    print(f"Experiment directory created: {path}")
+    if scripts_to_save:
+        script_dir = os.path.join(path, 'scripts')
+        os.makedirs(script_dir, exist_ok=True)
         for script in scripts_to_save:
-            dst_file = os.path.join(path, 'scripts', os.path.basename(script))
-            shutil.copyfile(script, dst_file)
+            shutil.copyfile(script, os.path.join(script_dir, os.path.basename(script)))
 
-
-class Logger(object):
-    def __init__(self, rank, save):
-        # other libraries may set logging before arriving at this line.
-        # by reloading logging, we can get rid of previous configs set by other libraries.
-        from importlib import reload
-        reload(logging)
+class Logger:
+    def __init__(self, rank, save_dir):
         self.rank = rank
         if self.rank == 0:
             log_format = '%(asctime)s %(message)s'
             logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                                 format=log_format, datefmt='%m/%d %I:%M:%S %p')
-            fh = logging.FileHandler(os.path.join(save, 'log.txt'))
+            fh = logging.FileHandler(os.path.join(save_dir, 'log.txt'))
             fh.setFormatter(logging.Formatter(log_format))
             logging.getLogger().addHandler(fh)
             self.start_time = time.time()
 
-    def info(self, string, *args):
+    def info(self, msg, *args):
         if self.rank == 0:
-            elapsed_time = time.time() - self.start_time
-            elapsed_time = time.strftime(
-                '(Elapsed: %H:%M:%S) ', time.gmtime(elapsed_time))
-            if isinstance(string, str):
-                string = elapsed_time + string
-            else:
-                logging.info(elapsed_time)
-            logging.info(string, *args)
+            elapsed = time.time() - self.start_time
+            elapsed_time = time.strftime('(Elapsed: %H:%M:%S) ', time.gmtime(elapsed))
+            if isinstance(msg, str):
+                msg = elapsed_time + msg
+            logging.info(msg, *args)
 
 
-# class Writer(object):
-#     def __init__(self, rank, save):
-#         self.rank = rank
-#         if self.rank == 0:
-#             self.writer = SummaryWriter(log_dir=save, flush_secs=20)
+class Writer:
+    def __init__(self, rank, save_dir):
+        self.rank = rank
+        if self.rank == 0:
+            self.writer = SummaryWriter(log_dir=save_dir, flush_secs=20)
 
-#     def add_scalar(self, *args, **kwargs):
-#         if self.rank == 0:
-#             self.writer.add_scalar(*args, **kwargs)
+    def add_scalar(self, *args, **kwargs):
+        if self.rank == 0:
+            self.writer.add_scalar(*args, **kwargs)
 
-#     def add_figure(self, *args, **kwargs):
-#         if self.rank == 0:
-#             self.writer.add_figure(*args, **kwargs)
+    def add_figure(self, *args, **kwargs):
+        if self.rank == 0:
+            self.writer.add_figure(*args, **kwargs)
 
-#     def add_image(self, *args, **kwargs):
-#         if self.rank == 0:
-#             self.writer.add_image(*args, **kwargs)
+    def add_image(self, *args, **kwargs):
+        if self.rank == 0:
+            self.writer.add_image(*args, **kwargs)
 
-#     def add_histogram(self, *args, **kwargs):
-#         if self.rank == 0:
-#             self.writer.add_histogram(*args, **kwargs)
+    def add_histogram(self, *args, **kwargs):
+        if self.rank == 0:
+            self.writer.add_histogram(*args, **kwargs)
 
-#     def add_histogram_if(self, write, *args, **kwargs):
-#         if write and False:   # Used for debugging.
-#             self.add_histogram(*args, **kwargs)
+    def close(self):
+        if self.rank == 0:
+            self.writer.close()
 
-#     def close(self, *args, **kwargs):
-#         if self.rank == 0:
-#             self.writer.close()
 
 
 def reduce_tensor(tensor, world_size):
-    rt = tensor.clone()
-    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-    rt /= world_size
-    return rt
+    tensor_clone = tensor.clone()
+    all_reduce(tensor_clone, op=ReduceOp.SUM)
+    tensor_clone /= world_size
+    return tensor_clone
+
 
 
 def get_stride_for_cell_type(cell_type):
@@ -195,31 +180,28 @@ def kl_balancer_coeff(num_scales, groups_per_scale, fun):
 
 def kl_per_group(kl_all):
     kl_vals =    torch.mean(kl_all, dim=0)
-    kl_coeff_i =   torch.abs(kl_all)
-    kl_coeff_i =   torch.mean(kl_coeff_i, dim=0, keepdim=True) + 0.01
+    kl_coeff_i =    torch.abs(kl_all)
+    kl_coeff_i =    torch.mean(kl_coeff_i, dim=0, keepdim=True) + 0.01
 
     return kl_coeff_i, kl_vals
-
 
 def kl_balancer(kl_all, kl_coeff=1.0, kl_balance=False, alpha_i=None):
     if kl_balance and kl_coeff < 1.0:
         alpha_i = alpha_i.unsqueeze(0)
-
-        kl_all =    torch.stack(kl_all, dim=1)
+        kl_all = torch.stack(kl_all, dim=1)
         kl_coeff_i, kl_vals = kl_per_group(kl_all)
-        total_kl =    torch.sum(kl_coeff_i)
+        total_kl = torch.sum(kl_coeff_i)
 
         kl_coeff_i = kl_coeff_i / alpha_i * total_kl
-        kl_coeff_i = kl_coeff_i /    torch.mean(kl_coeff_i, dim=1, keepdim=True)
-        kl =    torch.sum(kl_all * kl_coeff_i.detach(), dim=1)
+        kl_coeff_i = kl_coeff_i / torch.mean(kl_coeff_i, dim=1, keepdim=True)
+        kl = torch.sum(kl_all * kl_coeff_i.detach(), dim=1)
 
-        # for reporting
         kl_coeffs = kl_coeff_i.squeeze(0)
     else:
-        kl_all =    torch.stack(kl_all, dim=1)
-        kl_vals =    torch.mean(kl_all, dim=0)
-        kl =    torch.sum(kl_all, dim=1)
-        kl_coeffs =    torch.ones(size=(len(kl_vals),))
+        kl_all = torch.stack(kl_all, dim=1)
+        kl_vals = torch.mean(kl_all, dim=0)
+        kl = torch.sum(kl_all, dim=1)
+        kl_coeffs = torch.ones(len(kl_vals))
 
     return kl_coeff * kl, kl_coeffs, kl_vals
 

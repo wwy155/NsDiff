@@ -414,7 +414,7 @@ class ProbForecastExp(ForecastExp):
                     self.current_epoch + 1, time.time() - epoch_start_time
                 )
             )
-            self._run_print(f"Traininng loss : {np.mean(train_losses)}")
+            self._run_print(f"Traininng loss :.sum() {np.mean(train_losses)}")
 
             val_result = self._val()
             test_result = self._test()

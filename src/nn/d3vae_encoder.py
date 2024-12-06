@@ -34,7 +34,6 @@ class Cell(nn.Module):
                 primitive = arch[i]
                 op = OPS[primitive](Cout, Cout, stride)
             self._ops.append(op)
-        # SE
     def forward(self, s):
         skip = self.skip(s)
         for i in range(self._num_nodes):
@@ -47,19 +46,18 @@ def soft_clamp1(x):
 
 
 def sample_normal_jit(mu, sigma):
-    dist = torch.distributions.Normal(0, 1) # 8
-    eps = dist.sample(mu.shape).to(mu.device) 
-    z = mu + torch.exp(.5*sigma) * eps 
-    
+    dist = torch.distributions.Normal(0, 1)
+    eps = dist.sample(mu.shape).to(mu.device)
+    z = mu + torch.exp(0.5 * sigma) * eps
     return z, eps
 
 
-class Normal(object):
-    def __init__(self, mu, log_sigma, temp=1.):
+class Normal:
+    def __init__(self, mu, log_sigma, temp=1.0):
         self.mu = soft_clamp1(mu)
         log_sigma = soft_clamp1(log_sigma)
-        self.sigma = torch.exp(log_sigma)    
-        if temp != 1.:
+        self.sigma = torch.exp(log_sigma)
+        if temp != 1.0:
             self.sigma *= temp
 
     def sample(self):
@@ -83,15 +81,15 @@ class NormalDecoder:
     def __init__(self, param):
         B, C, H, W = param.shape
         self.num_c = C // 2
-        self.mu = param[:, :self.num_c, :, :]                                 
-        self.log_sigma = param[:, self.num_c:, :, :]                          
+        self.mu = param[:, :self.num_c, :, :]
+        self.log_sigma = param[:, self.num_c:, :, :]
         self.sigma = torch.exp(self.log_sigma) + 1e-2
         self.dist = Normal(self.mu, self.log_sigma)
 
     def log_prob(self, samples):
         return self.dist.log_p(samples)
 
-    def sample(self, ):
+    def sample(self,):
         x, _ = self.dist.sample()
         return x
 
@@ -112,13 +110,13 @@ def log_density_gaussian(sample, mu, logvar):
     mu = soft_clamp1(mu)
     logvar = soft_clamp1(logvar)
 
-    normalization = - 0.5 * (math.log(2 * math.pi) + logvar)
+    normalization = -0.5 * (math.log(2 * math.pi) + logvar)
     inv_var = torch.exp(-logvar)
-    log_density = normalization - 0.5 * ((sample - mu)**2 * inv_var)
-    #print(log_density.shape)
-    log_qz = torch.logsumexp(torch.sum(log_density, [2,3]), axis=1, keepdim=False)
-    log_prod_qzi = torch.logsumexp(log_density, axis=1, keepdim=False).sum((1,2))
-   
+    log_density = normalization - 0.5 * ((sample - mu) ** 2 * inv_var)
+
+    log_qz = torch.logsumexp(torch.sum(log_density, dim=[2,3]), dim=1, keepdim=False)
+    log_prod_qzi = torch.logsumexp(log_density, dim=1, keepdim=False).sum((1,2))
+
     loss_p_z = (log_qz - log_prod_qzi)
     
     # The obtained loss_p_z need to scale again to avoid anomal data points.
@@ -128,54 +126,52 @@ def log_density_gaussian(sample, mu, logvar):
 
 
 class Encoder(nn.Module):
-    def __init__(self, sequence_length,  mult,  channel_mult,  prediction_length,  num_preprocess_blocks,  num_preprocess_cells,
-                  num_channels_enc,  arch_instance,  num_latent_per_group,  num_channels_dec, 
-                   num_postprocess_blocks,  num_postprocess_cells,  embedding_dimension,  hidden_size,  target_dim,  num_layers,dropout_rate, groups_per_scale):
+    def __init__(self, args):
         super(Encoder, self).__init__()
         
-        self.channel_mult = channel_mult
-        self.mult = mult
-        self.prediction_length = prediction_length
-        self.num_preprocess_blocks = num_preprocess_blocks
-        self.num_preprocess_cells = num_preprocess_cells
-        self.num_channels_enc = num_channels_enc
-        self.arch_instance = get_arch_cells(arch_instance)
-        self.stem = Conv2D(1, num_channels_enc, 3, padding=1, bias=True)
-        self.num_latent_per_group = num_latent_per_group
+        self.channel_mult = args.channel_mult
+        self.mult = args.mult
+        self.prediction_length = args.prediction_length
+        self.num_preprocess_blocks = args.num_preprocess_blocks
+        self.num_preprocess_cells = args.num_preprocess_cells
+        self.num_channels_enc = args.num_channels_enc
+        self.arch_instance = get_arch_cells(args.arch_instance)
+        self.stem = Conv2D(1, args.num_channels_enc, 3, padding=1, bias=True)
+        self.num_latent_per_group = args.num_latent_per_group
         
-        self.num_channels_dec = num_channels_dec 
-        self.groups_per_scale = groups_per_scale
-        self.num_postprocess_blocks = num_postprocess_blocks
-        self.num_postprocess_cells = num_postprocess_cells
+        self.num_channels_dec = args.num_channels_dec 
+        self.groups_per_scale = args.groups_per_scale
+        self.num_postprocess_blocks = args.num_postprocess_blocks
+        self.num_postprocess_cells = args.num_postprocess_cells
         self.use_se = False
-        self.input_size = embedding_dimension
-        self.hidden_size = hidden_size
-        self.projection = nn.Linear(embedding_dimension+hidden_size, target_dim)
+        self.input_size = args.embedding_dimension
+        self.hidden_size = args.hidden_size
+        self.projection = nn.Linear(args.embedding_dimension+args.hidden_size, args.target_dim)
 
         c_scaling = self.channel_mult ** (self.num_preprocess_blocks) #4
         spatial_scaling = 2 ** (self.num_preprocess_blocks) #4
 
-        prior_ftr0_size = (int(c_scaling * self.num_channels_dec), prediction_length// spatial_scaling,
-                           (embedding_dimension + hidden_size + 1) // spatial_scaling)
-        self.prior_ftr0 = torch.tensor(torch.rand(prior_ftr0_size), requires_grad=False)
-        self.z0_size = [self.num_latent_per_group, prediction_length // spatial_scaling, (embedding_dimension+ hidden_size + 1) // spatial_scaling]
+        prior_ftr0_size = (int(c_scaling * self.num_channels_dec), args.prediction_length// spatial_scaling,
+                           (args.embedding_dimension + args.hidden_size + 1) // spatial_scaling)
+        self.prior_ftr0 = nn.Parameter(torch.randn(prior_ftr0_size), requires_grad=True)
+        self.z0_size = [self.num_latent_per_group, args.prediction_length // spatial_scaling, (args.embedding_dimension+ args.hidden_size + 1) // spatial_scaling]
 
-        self.pre_process = self.init_pre_process(mult)
+        self.pre_process = self.init_pre_process(args.mult)
         self.enc_tower = self.init_encoder_tower(self.mult)
         self.enc0 = nn.Sequential(nn.ELU(), Conv2D(self.num_channels_enc * self.mult, 
                         self.num_channels_enc * self.mult, kernel_size=1, bias=True), nn.ELU())
         
         self.enc_sampler, self.dec_sampler = self.init_sampler(self.mult)
         self.dec_tower = self.init_decoder_tower(self.mult)
-      
         self.post_process = self.init_post_process(self.mult)
         self.image_conditional = nn.Sequential(nn.ELU(),
-                             Conv2D(int(self.num_channels_dec * self.mult), 2, 3, padding=1, bias=True))
+                                               Conv2D(int(self.num_channels_dec * self.mult), 2, 3, padding=1,
+                                                      bias=True))
         self.rnn = nn.GRU(
-            input_size=sequence_length,
-            hidden_size=prediction_length,
-            num_layers=num_layers,
-            dropout=dropout_rate,
+            input_size=args.sequence_length,
+            hidden_size=args.prediction_length,
+            num_layers=args.num_layers,
+            dropout=args.dropout_rate,
         )
 
     def init_pre_process(self, mult):
@@ -268,7 +264,7 @@ class Encoder(nn.Module):
         return post_process
     
     def forward(self, x):
-        s = self.stem(2 * x - 1.0) # (B, 1, T, *)
+        s = self.stem(2 * x - 1.0)
         #print(s.shape)
         for cell in self.pre_process:
             s = cell(s)
@@ -285,15 +281,14 @@ class Encoder(nn.Module):
         combiner_cells_s.reverse()
         idx_dec = 0
         ftr = self.enc0(s)   #conv                   
-        param0 = self.enc_sampler[idx_dec](ftr).to(x.device) # another conv2d
+        param0 = self.enc_sampler[idx_dec](ftr) # another conv2d
         mu_q, log_sig_q = torch.chunk(param0, 2, axis=1)
-        dist = Normal(mu_q.to(x.device), log_sig_q.to(x.device))   # for the first approx. posterior
+        dist = Normal(mu_q, log_sig_q)   # for the first approx. posterior
         z, _ = dist.sample()   #z_0
-        z = z.to(x.device)
         all_z.append(z)
         loss_qz = log_density_gaussian(z, mu_q, log_sig_q)
         idx_dec = 0
-        s = self.prior_ftr0.unsqueeze(0).to(x.device) # random value
+        s = self.prior_ftr0.unsqueeze(0) # random value
         batch_size = z.shape[0]
         s = s.expand((batch_size, -1, -1, -1))
         total_c = 0
@@ -301,16 +296,16 @@ class Encoder(nn.Module):
             if cell.cell_type == 'combiner_dec':
                 if idx_dec > 0:
                     ftr = combiner_cells_enc[idx_dec - 1](combiner_cells_s[idx_dec - 1], s)
-                    param = self.enc_sampler[idx_dec](ftr).to(x.device)
+                    param = self.enc_sampler[idx_dec](ftr)
                     mu_q, log_sig_q = torch.chunk(param, 2, axis=1)
                     
-                    dist = Normal(mu_q.to(x.device), log_sig_q.to(x.device))  # The gaussial distribution
+                    dist = Normal(mu_q, log_sig_q)  # The gaussial distribution
                     z, _ = dist.sample()    #sample from the distribution to gennerate z_n
-                    z = z.to(x.device)
                     all_z.append(z)
                     #print(z.shape)
                     loss_qz = log_density_gaussian(z, mu_q, log_sig_q)
                     total_c += loss_qz
+        
                 s = cell(s, z)
                 idx_dec += 1
             else:

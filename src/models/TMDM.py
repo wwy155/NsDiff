@@ -84,7 +84,6 @@ class TMDM(nn.Module):
         self.enc_embedding = DataEmbedding(configs.enc_in, configs.CART_input_x_embed_dim, configs.embed, configs.freq,
                                            configs.dropout)
 
-        a = 0
 
     def forward(self, x, x_mark, y, y_t, y_0_hat, t):
         enc_out = self.enc_embedding(x, x_mark) #  B, T, d_model

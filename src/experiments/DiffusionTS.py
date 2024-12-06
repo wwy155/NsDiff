@@ -32,13 +32,13 @@ class DiffusionTSParameters:
     # beta_end: float =  0.5
     # num_steps: int =  100
     # vis_ar_part: int =  0
-    num_samples :int = 20
+    num_samples :int = 100
 
     n_layer_enc: int =3
     n_layer_dec: int =6
     d_model: int = 64
-    timesteps: int = 500
-    sampling_timesteps: int = 200
+    timesteps: int = 100
+    sampling_timesteps: int = 100
     loss_type : str ='l1'
     beta_schedule: str ='cosine'
     n_heads: int =4
