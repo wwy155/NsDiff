@@ -16,6 +16,7 @@ from tqdm import tqdm
 from torch.nn import MSELoss, L1Loss
 from torch.optim import *
 from torch_timeseries.dataset import *
+from src.datasets import *
 from torch_timeseries.scaler import *
 from src.metrics import CRPS, CRPSSum, QICE, PICP
 from src.metrics import ProbMAE, ProbMSE, ProbRMSE
@@ -63,7 +64,10 @@ class ProbForecastExp(ForecastExp):
         ctx = mp.get_context("spawn")  # Options: 'fork', 'spawn', 'forkserver'
         self.task_pool = ctx.Pool(processes=32)
 
-
+    def _init_dataset(self):
+        self.dataset: TimeSeriesDataset = parse_type(self.dataset_type, globals())(
+            root=self.data_path
+        )
 
     def _train(self):
         with torch.enable_grad(), tqdm(total=len(self.train_loader.dataset)) as progress_bar:
@@ -189,7 +193,7 @@ class ProbForecastExp(ForecastExp):
         return result
     
     
-    def _init_data_loader(self):
+    def _init_data_loader(self, shuffle=True, fast_test=True, fast_val=True):
         
         self._init_dataset()
         
@@ -202,13 +206,12 @@ class ProbForecastExp(ForecastExp):
                     window=self.windows,
                     horizon=self.horizon,
                     steps=self.pred_len,
-                    shuffle_train=True,
+                    shuffle_train=shuffle,
                     freq=self.dataset.freq,
                     batch_size=self.batch_size,
                     num_worker=self.num_worker,
-                    fast_test=True,
-                    fast_val=True,
-
+                    fast_test=fast_test,
+                    fast_val=fast_val,
                 )
             elif  self.dataset_type[0:4] == "ETTm":
                 self.dataloader = ETTMLoader(
@@ -217,12 +220,12 @@ class ProbForecastExp(ForecastExp):
                     window=self.windows,
                     horizon=self.horizon,
                     steps=self.pred_len,
-                    shuffle_train=True,
+                    shuffle_train=shuffle,
                     freq=self.dataset.freq,
                     batch_size=self.batch_size,
                     num_worker=self.num_worker,
-                    fast_test=True,
-                    fast_val=True,
+                    fast_test=fast_test,
+                    fast_val=fast_val,
                 )
         else:
             self.dataloader = SlidingWindowTS(
@@ -232,14 +235,14 @@ class ProbForecastExp(ForecastExp):
                 horizon=self.horizon,
                 steps=self.pred_len,
                 scale_in_train=True,
-                shuffle_train=True,
+                shuffle_train=shuffle,
                 freq=self.dataset.freq,
                 batch_size=self.batch_size,
                 train_ratio=self.train_ratio,
                 test_ratio=self.test_ratio,
                 num_worker=self.num_worker,
-                fast_test=True,
-                fast_val=True,
+                fast_test=fast_test,
+                fast_val=fast_val,
             )
 
         self.train_loader, self.val_loader, self.test_loader = (

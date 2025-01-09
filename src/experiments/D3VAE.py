@@ -22,7 +22,7 @@ import torch.multiprocessing as mp
 from torch_timeseries.utils.parse_type import parse_type
 from torch_timeseries.utils.reproduce import reproducible
 from torch_timeseries.core import TimeSeriesDataset, BaseIrrelevant, BaseRelevant
-from torch_timeseries.dataloader import SlidingWindowTS
+from torch_timeseries.dataloader import SlidingWindowTS, ETTMLoader, ETTHLoader
 
 import numpy as np
 import torch.distributed as dist
@@ -38,17 +38,17 @@ class D3VAEParameters:
     dropout_rate: int = 0.1
     beta_schedule: str = 'linear'
     beta_start: float = 0.0
-    beta_end: int = 0.1
+    beta_end: int = 0.01
     diff_step: int = 100
     scale: int = 0.1
     mult: int = 1
     channel_mult: int = 2
     num_preprocess_blocks: int = 1
     num_preprocess_cells: int = 3
-    num_channels_enc: int = 32 #
     arch_instance: str = 'res_mbconv'
     num_latent_per_group: int = 8
-    num_channels_dec : int = 16 # default 32 but OOM 
+    num_channels_enc: int = 32 #
+    num_channels_dec : int = 32 # default 32 but OOM 
     num_postprocess_blocks: int = 1
     num_postprocess_cells: int = 2
     hidden_size: int = 128 # default 128 but OOM 
@@ -61,55 +61,54 @@ class D3VAEParameters:
 @dataclass
 class D3VAEForecast(ProbForecastExp, D3VAEParameters):
     model_type: str = "D3VAE"
+    batch_size :int = 8
     def _init_model(self):
         seq_len = max(self.pred_len, self.windows)
-        
-        
         args = {
 
-            "arch_instance":'res_mbconv',
+            "arch_instance":self.arch_instance,
             # batch_size:16,
-            "beta_end":0.01,
-            "beta_schedule":'linear',
-            "beta_start":0.0,
-            "channel_mult":2,
+            "beta_end":self.beta_end,
+            "beta_schedule":self.beta_schedule,
+            "beta_start":self.beta_start,
+            "channel_mult":self.channel_mult,
             # checkpoints:'./checkpoints/', 
             # data_path:'electricity.csv',
-            "detail_freq":'t',
+            "detail_freq":self.dataset.freq,
             # devices:'0,1,2,3',
-            "diff_steps":100,
+            "diff_steps":self.diff_step,
             # "dim":-1,
-            "dropout_rate":0.1,
-            "embedding_dimension":64,
+            "dropout_rate":self.dropout_rate,
+            "embedding_dimension":self.embedding_dimension,
             "features":'M',
-            "freq":'t',
-            "gamma":0.01,
+            "freq":self.dataset.freq,
+            "gamma":self.gamma,
             # gpu:0, 
-            "groups_per_scale":2,
-            "hidden_size":128, 
+            "groups_per_scale":self.groups_per_scale,
+            "hidden_size":self.hidden_size,
             "input_dim":self.dataset.num_features, 
             "inverse":False, 
-            "itr":5, 
-            "lambda1":1,
+            # "itr":5, 
+            "lambda1":self.lambda1,
             # "learning_rate":0.005, 
             "loss_type":'kl',
-            "mult":1, 
-            "num_channels_dec":32, 
-            "num_channels_enc":32, 
-            "num_latent_per_group":8, 
-            "num_layers":2,
-            "num_postprocess_blocks":1,
-            "num_postprocess_cells":2, 
-            "num_preprocess_blocks":1, 
-            "num_preprocess_cells":3, 
+            "mult":self.mult,
+            "num_channels_dec":self.num_channels_dec,
+            "num_channels_enc":self.num_channels_enc,
+            "num_latent_per_group":self.num_latent_per_group,
+            "num_layers":self.num_layers,
+            "num_postprocess_blocks":self.num_postprocess_blocks,
+            "num_postprocess_cells":self.num_postprocess_cells,
+            "num_preprocess_blocks":self.num_preprocess_blocks,
+            "num_preprocess_cells":self.num_preprocess_cells,
             # num_workers:0,
             # patience:5, 
-            "percentage":0.05, 
-            "prediction_length":self.pred_len, 
-            "psi":0.5, 
+            # "percentage":0.05, 
+            "prediction_length":seq_len, 
+            "psi":self.psi,
             # root_path:'./data/', 
-            "scale":0.1, 
-            "sequence_length":self.windows, 
+            "scale":self.scale,
+            "sequence_length":seq_len, 
             # target:'target', 
             "target_dim":self.dataset.num_features, 
             # weight_decay:sefl
@@ -152,23 +151,54 @@ class D3VAEForecast(ProbForecastExp, D3VAEParameters):
         super()._init_data_loader()
         
         if self.pred_len < self.windows:
-            # train using same window and pred_length
-            self.dataloader1 = SlidingWindowTS(
-                self.dataset,
-                self.scaler,
-                window=self.windows,
-                horizon=self.horizon,
-                steps=self.windows,
-                scale_in_train=True,
-                shuffle_train=True,
-                freq=self.dataset.freq,
-                batch_size=self.batch_size,
-                train_ratio=self.train_ratio,
-                test_ratio=self.test_ratio,
-                num_worker=self.num_worker,
-                fast_val=True,
-                fast_test=True
-            )
+            if self.dataset_type[0:3] == "ETT":
+                if self.dataset_type[0:4] == "ETTh":
+                    self.dataloader1 = ETTHLoader(
+                        self.dataset,
+                        self.scaler,
+                        window=self.windows,
+                        horizon=self.horizon,
+                        steps=self.windows,
+                        shuffle_train=True,
+                        freq=self.dataset.freq,
+                        batch_size=self.batch_size,
+                        num_worker=self.num_worker,
+                        fast_test=True,
+                        fast_val=True,
+                    )
+
+                elif  self.dataset_type[0:4] == "ETTm":
+                    self.dataloader1 = ETTMLoader(
+                        self.dataset,
+                        self.scaler,
+                        window=self.windows,
+                        horizon=self.horizon,
+                        steps=self.windows,
+                        shuffle_train=True,
+                        freq=self.dataset.freq,
+                        batch_size=self.batch_size,
+                        num_worker=self.num_worker,
+                        fast_test=True,
+                        fast_val=True,
+                    )
+            else:
+                # train using same window and pred_length
+                self.dataloader1 = SlidingWindowTS(
+                    self.dataset,
+                    self.scaler,
+                    window=self.windows,
+                    horizon=self.horizon,
+                    steps=self.windows,
+                    scale_in_train=True,
+                    shuffle_train=True,
+                    freq=self.dataset.freq,
+                    batch_size=self.batch_size,
+                    train_ratio=self.train_ratio,
+                    test_ratio=self.test_ratio,
+                    num_worker=self.num_worker,
+                    fast_val=True,
+                    fast_test=True
+                )
             self.train_loader = self.dataloader1.train_loader
 
         self.train_steps = len(self.train_loader.dataset)
@@ -195,6 +225,12 @@ class D3VAEForecast(ProbForecastExp, D3VAEParameters):
         #     # pad pred if pred length is shorter
         #     batch_y = torch.nn.functional.pad(batch_y.transpose(1, 2), (0, self.windows - self.pred_len)).transpose(1, 2)
         #     batch_y_date_enc = torch.nn.functional.pad(batch_y_date_enc.transpose(1, 2), (0, self.windows - self.pred_len)).transpose(1, 2)
+        b = batch_x.shape[0]
+        
+        # x has to be in even batchsize
+        batch_x =   torch.concat([batch_x, batch_x[0:1, :, :]], dim=0) if b%2  else batch_x 
+        batch_x_date_enc =   torch.concat([batch_x_date_enc, batch_x_date_enc[0:1, :, :]], dim=0) if b%2 else batch_x_date_enc 
+        batch_y =   torch.concat([batch_y, batch_y[0:1, :, :]], dim=0) if b%2  else batch_y 
         
         t = torch.randint(0, self.diff_step, (batch_x.shape[0],), dtype=torch.int64, device=self.device)
         output, y_noisy, total_c, loss = self.model(batch_x,batch_x_date_enc,  batch_y, t)
@@ -212,16 +248,22 @@ class D3VAEForecast(ProbForecastExp, D3VAEParameters):
             # pad input if input length is shorter
             batch_x = torch.nn.functional.pad(batch_x.transpose(1, 2), (self.pred_len - self.windows, 0)).transpose(1, 2)
             batch_x_date_enc = torch.nn.functional.pad(batch_x_date_enc.transpose(1, 2), (self.pred_len - self.windows, 0)).transpose(1, 2)
-
-        mini_sample = 1
+        
+        
+        num_samples = 100
+        mini_sample = 2
+        
         outs= []
-        for i in range(20//mini_sample):
+        for i in range(num_samples//mini_sample):
             repeat_batch_x = batch_x.repeat(mini_sample, 1, 1)
             repeat_xdate_enc = batch_x_date_enc.repeat(mini_sample, 1, 1)
             noisy_out, out, _ = self.model.prob_pred(repeat_batch_x, repeat_xdate_enc)
+            out = out.reshape(batch_x.shape[0], mini_sample, out.shape[-2], out.shape[-1])
             outs.append(out.detach().cpu())
         outs = torch.concat(outs, dim=1)
-        outs = outs.permute(0, 2, 3, 1)[:, -self.pred_len:, :, :]
+        
+        # if windows > pred_len, select the previous 
+        outs = outs.permute(0, 2, 3, 1)[:, :self.pred_len, :, :]
         return outs, batch_y
 
 
@@ -279,7 +321,6 @@ class D3VAEForecast(ProbForecastExp, D3VAEParameters):
                 batch_y = batch_y.to(self.device).float()
                 batch_x_date_enc = batch_x_date_enc.to(self.device).float()
                 batch_y_date_enc = batch_y_date_enc.to(self.device).float()
-
                 output, y_noisy, total_c, loss2 = self._process_train_batch(
                     batch_x, batch_y, batch_x_date_enc, batch_y_date_enc
                 )

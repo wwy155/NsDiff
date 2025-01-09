@@ -92,7 +92,6 @@ class denoise_net(nn.Module):
            loss: Float
                The loss of score matching.
         """
-        
         # Embed the original time series.
         input = self.embedding(past_time_feat,  past_time_feat_mark)  # [B, T, *]
 
@@ -145,7 +144,6 @@ class denoise_net(nn.Module):
             tc: Total correlations, indicator of extent of disentangling.
         """
         with torch.enable_grad():
-            
             input = self.embedding(x, mark)
             x_t, _ = self.diffusion_gen.rnn(input)
             input = torch.concat([x_t, input], axis=-1)
