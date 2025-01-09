@@ -4,7 +4,7 @@ from torch_timeseries.nn.Transformer_EncDec import Decoder, DecoderLayer, Encode
 from torch_timeseries.nn.SelfAttention_Family import DSAttention, AttentionLayer
 from torch_timeseries.nn.embedding import DataEmbedding
 import torch.nn.functional as F
-from src.utils.sigma import wv_sigma
+from src.utils.sigma import wv_sigma, wv_sigma_trailing
 
 # class MLP(nn.Module):
 
@@ -31,7 +31,7 @@ class SigmaEstimation(nn.Module):
         
         # Define 2-layer MLP for predicting future sigmas
         self.mlp = nn.Sequential(
-            nn.Linear(seq_len, hidden_size),
+            nn.Linear(seq_len -  kernel_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, pred_len)  # Output size should match enc_in
         )
@@ -55,8 +55,9 @@ class SigmaEstimation(nn.Module):
         # mean = F.conv1d(x_enc_padded.permute(0, 2, 1), weight=torch.ones(1, N, self.window_size).to(x_enc.device) / self.window_size, stride=1)
         # std_dev = torch.sqrt(mean_sq - mean ** 2)
         
-        sigma = wv_sigma(x_enc, self.kernel_size)        
+        sigma = wv_sigma_trailing(x_enc, self.kernel_size, discard_rep=True)        
         # 2. Use MLP to predict future sigma values
+        sigma = sigma[:, -(T - self.kernel_size):, :]
         pred_sigma = self.mlp(sigma.permute(0, 2, 1))  # (B, T, N) -> (B, N, T)
         
         # 3. Extract the last `pred_len` time steps for prediction

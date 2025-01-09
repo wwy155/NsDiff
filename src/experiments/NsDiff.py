@@ -294,13 +294,8 @@ class NsDiffForecast(ProbForecastExp, NsDiffParameters):
         # dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
         # dec_inp = torch.cat([batch_x[:, -self.label_len:, :], dec_inp], dim=1).float().to(self.device)
         # y_sigma = wv_sigma(batch_y, self.rolling_length) + EPS
-        y_sigma = wv_sigma(torch.concat([batch_x, batch_y], dim=1), self.rolling_length) 
+        y_sigma = wv_sigma_trailing(torch.concat([batch_x, batch_y], dim=1), self.rolling_length) 
         y_sigma = y_sigma[:, -self.pred_len:, :] + EPS
-        
-        
-        
-        # x_sigma = wv_sigma(batch_x, self.rolling_length)
-
         
         batch_y_input = torch.concat([batch_x[:, -self.label_len:, :], batch_y], dim=1)
         batch_y_mark_input = torch.concat([batch_x_mark[:, -self.label_len:, :], batch_y_mark], dim=1)
@@ -323,12 +318,13 @@ class NsDiffForecast(ProbForecastExp, NsDiffParameters):
         loss1 = (y_0_hat_batch - batch_y).square().mean()
         loss2 = (torch.sqrt(gx)- torch.sqrt(y_sigma)).square().mean()
         
+        
         # loss_vae = log_normal(batch_y, y_0_hat_batch, torch.from_numpy(np.array(1)))
         # loss_vae_all = loss_vae + self.k_z * KL_loss
         # y_0_hat_batch = z_sample
         y_T_mean = y_0_hat_batch
         e = torch.randn_like(batch_y).to(self.device)
-        noise = e * y_sigma
+        noise = e * torch.sqrt(y_sigma)
 
         y_t_batch = q_sample(batch_y, y_T_mean, self.model.alphas_bar_sqrt,
                                 self.model.one_minus_alphas_bar_sqrt, t, noise=noise)
@@ -338,8 +334,10 @@ class NsDiffForecast(ProbForecastExp, NsDiffParameters):
         sigma_theta = sigma_theta + EPS
         # loss = (e[:, -self.args.pred_len:, :] - output[:, -self.args.pred_len:, :]).square().mean()
         # kl_loss = ((e - output)/sigma_theta).square().mean() + (y_sigma/sigma_theta).mean() - torch.log(y_sigma/sigma_theta).mean()
-        kl_loss = ((e - output)/sigma_theta).square().mean() + (y_sigma/sigma_theta).mean() - torch.log(y_sigma/sigma_theta).mean()
+        kl_loss = ((e - output)).square().mean() + (y_sigma/sigma_theta).mean() - torch.log(y_sigma/sigma_theta).mean()
         loss = kl_loss + loss1 + loss2 
+        print(kl_loss.item(), loss1.item() , loss2.item())
+        # /sigma_theta
         return loss
 
 
