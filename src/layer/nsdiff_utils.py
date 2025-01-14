@@ -37,6 +37,41 @@ def extract(input, t, x):
     reshape = [t.shape[0]] + [1] * (len(shape) - 1)
     return out.reshape(*reshape)
 
+def cal_sigma12(alphas,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, gx, y_sigma, t):
+    
+    at = extract(alphas, t, gx)
+    at_bar = extract(alphas_cumprod, t, gx)
+    at_bar_prev = extract(alpha_bar_prev, t, gx)
+    at_tilde = extract(alphas_cumprod_sum, t, gx)
+    at_tilde_prev = extract(alphas_cumprod_sum_prev, t, gx)
+
+    Sigma_1 = (1 - at)*gx + at*y_sigma
+    Sigma_2 = (1 - at_bar_prev)*gx +at_tilde_prev*y_sigma
+    # sigma_tilde = (Sigma_1*Sigma_2)/(at * Sigma_2 + Sigma_1)
+    # # mu_tilde = (Sigma_1*Sigma_2)/(at * Sigma_2 + Sigma_1)
+    # Sigma_1 = 1 - at
+    # Sigma_2 = 1 - at_bar_prev
+    return at, at_bar, at_tilde, Sigma_1, Sigma_2
+
+def cal_sigma_tilde(alphas,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, gx, y_sigma, t):
+    at, at_bar, at_tilde, Sigma_1, Sigma_2 = cal_sigma12(alphas,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, gx, y_sigma, t)
+    sigma_tilde = (Sigma_1*Sigma_2)/(at * Sigma_2 + Sigma_1)
+    return sigma_tilde
+
+def calc_gammas(alphas,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, gx, y_sigma, t):
+    at, at_bar, at_tilde, Sigma_1, Sigma_2 = cal_sigma12(alphas,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, gx, y_sigma, t)
+    
+    alpha_bar_t_m_1 = extract(alpha_bar_prev, t, gx)
+    sqrt_alpha_t = at.sqrt()
+    sqrt_alpha_bar_t_m_1 = alpha_bar_t_m_1.sqrt()
+    
+    at_s1_s2 = at*Sigma_2 + Sigma_1
+    
+    gamma_0 = sqrt_alpha_bar_t_m_1*Sigma_1/at_s1_s2
+    gamma_1 = sqrt_alpha_t*Sigma_2/at_s1_s2
+    gamma_2 = ((sqrt_alpha_t*(at - 1))*Sigma_2 + (1 - sqrt_alpha_bar_t_m_1)*Sigma_1)/at_s1_s2
+    return gamma_0, gamma_1, gamma_2
+
 
 # Forward functions
 def q_sample(y, y_0_hat, alphas_bar_sqrt, one_minus_alphas_bar_sqrt, t, noise=None):
@@ -49,12 +84,12 @@ def q_sample(y, y_0_hat, alphas_bar_sqrt, one_minus_alphas_bar_sqrt, t, noise=No
     sqrt_alpha_bar_t = extract(alphas_bar_sqrt, t, y)
     sqrt_one_minus_alpha_bar_t = extract(one_minus_alphas_bar_sqrt, t, y)
     # q(y_t | y_0, x)
-    y_t = sqrt_alpha_bar_t * y + (1 - sqrt_alpha_bar_t) * y_0_hat + sqrt_one_minus_alpha_bar_t * noise
+    y_t = sqrt_alpha_bar_t * y + (1 - sqrt_alpha_bar_t) * y_0_hat + noise
     return y_t
 
 
 # Reverse function -- sample y_{t-1} given y_t
-def p_sample(model, x, x_mark, y, y_0_hat, gx, y_T_mean, t, alphas, one_minus_alphas_bar_sqrt):
+def p_sample(model, x, x_mark, y, y_0_hat, gx, y_T_mean, t, alphas, one_minus_alphas_bar_sqrt, alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev):
     """
     Reverse diffusion process sampling -- one time step.
 
@@ -68,50 +103,62 @@ def p_sample(model, x, x_mark, y, y_0_hat, gx, y_T_mean, t, alphas, one_minus_al
     device = next(model.parameters()).device
     t = torch.tensor([t]).to(device)
     eps_theta, sigma_theta = model(x, x_mark, y, y_0_hat, gx, t)
+    
     eps_theta = eps_theta.to(device).detach()
     sigma_theta = sigma_theta.to(device).detach()
     
-    z = torch.sqrt(sigma_theta) * torch.randn_like(y)  # if t > 1 else torch.zeros_like(y)
+    z =  torch.randn_like(y)  # if t > 1 else torch.zeros_like(y)
     alpha_t = extract(alphas, t, y)
+    
     sqrt_one_minus_alpha_bar_t = extract(one_minus_alphas_bar_sqrt, t, y)
     sqrt_one_minus_alpha_bar_t_m_1 = extract(one_minus_alphas_bar_sqrt, t - 1, y)
     sqrt_alpha_bar_t = (1 - sqrt_one_minus_alpha_bar_t.square()).sqrt()
     sqrt_alpha_bar_t_m_1 = (1 - sqrt_one_minus_alpha_bar_t_m_1.square()).sqrt()
-    # y_t_m_1 posterior mean component coefficients
-    gamma_0 = (1 - alpha_t) * sqrt_alpha_bar_t_m_1 / (sqrt_one_minus_alpha_bar_t.square())
-    gamma_1 = (sqrt_one_minus_alpha_bar_t_m_1.square()) * (alpha_t.sqrt()) / (sqrt_one_minus_alpha_bar_t.square())
-    gamma_2 = 1 + (sqrt_alpha_bar_t - 1) * (alpha_t.sqrt() + sqrt_alpha_bar_t_m_1) / (
-        sqrt_one_minus_alpha_bar_t.square())
+    
+    # y_t_m_1 posterior mean component coefficients, when inference, use gx to replace \Sigma_{Y_0}
+    gamma_0, gamma_1, gamma_2 = calc_gammas(alphas, alphas_cumprod, alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, gx, gx, t)
+    at, at_bar, at_tilde, Sigma_1, Sigma_2 = cal_sigma12(alphas, alphas_cumprod, alphas_cumprod_sum,alpha_bar_prev, alphas_cumprod_sum_prev, gx, gx, t)
+    # gamma_0 = (1 - alpha_t) * sqrt_alpha_bar_t_m_1 / (sqrt_one_minus_alpha_bar_t.square())
+    # gamma_1 = (sqrt_one_minus_alpha_bar_t_m_1.square()) * (alpha_t.sqrt()) / (sqrt_one_minus_alpha_bar_t.square())
+    # gamma_2 = 1 + (sqrt_alpha_bar_t - 1) * (alpha_t.sqrt() + sqrt_alpha_bar_t_m_1) / (
+    #     sqrt_one_minus_alpha_bar_t.square())
+    
+    
+    
+    
     # y_0 reparameterization
     y_0_reparam = 1 / sqrt_alpha_bar_t * (
-            y - (1 - sqrt_alpha_bar_t) * y_T_mean - eps_theta * sqrt_one_minus_alpha_bar_t * torch.sqrt(sigma_theta))
+            y - (1 - sqrt_alpha_bar_t) * y_T_mean - eps_theta*torch.sqrt(Sigma_2))
     # posterior mean
     y_t_m_1_hat = gamma_0 * y_0_reparam + gamma_1 * y + gamma_2 * y_T_mean
     # posterior variance
-    beta_t_hat = (sqrt_one_minus_alpha_bar_t_m_1.square()) / (sqrt_one_minus_alpha_bar_t.square()) * (1 - alpha_t)
-    y_t_m_1 = y_t_m_1_hat.to(device) + beta_t_hat.sqrt().to(device) * z.to(device)
+    y_t_m_1 = y_t_m_1_hat.to(device) + torch.sqrt(sigma_theta) *z.to(device)
     return y_t_m_1
 
 
 # Reverse function -- sample y_0 given y_1
-def p_sample_t_1to0(model, x, x_mark, y, y_0_hat, gx, y_T_mean, one_minus_alphas_bar_sqrt):
+def p_sample_t_1to0(model, x, x_mark, y, y_0_hat, gx, y_T_mean, one_minus_alphas_bar_sqrt,alphas,alphas_cumprod,alphas_cumprod_sum,alpha_bar_prev, alphas_cumprod_sum_prev):
     device = next(model.parameters()).device
     t = torch.tensor([0]).to(device)  # corresponding to timestep 1 (i.e., t=1 in diffusion models)
     sqrt_one_minus_alpha_bar_t = extract(one_minus_alphas_bar_sqrt, t, y)
     sqrt_alpha_bar_t = (1 - sqrt_one_minus_alpha_bar_t.square()).sqrt()
     eps_theta, sigma_theta = model(x, x_mark, y, y_0_hat, gx, t)
     
+    # at_tilde = extract(alphas_cumprod_sum, t, gx)
+    
+    at, at_bar, at_tilde, Sigma_1, Sigma_2 = cal_sigma12(alphas, alphas_cumprod,alphas_cumprod_sum,alpha_bar_prev, alphas_cumprod_sum_prev, gx, gx, t)
+    
     eps_theta = eps_theta.to(device).detach()
     sigma_theta = sigma_theta.to(device).detach()
     
     # y_0 reparameterization
     y_0_reparam = 1 / sqrt_alpha_bar_t * (
-            y - (1 - sqrt_alpha_bar_t) * y_T_mean - eps_theta * sqrt_one_minus_alpha_bar_t * torch.sqrt(sigma_theta))
+            y - (1 - sqrt_alpha_bar_t) * y_T_mean - eps_theta * torch.sqrt(Sigma_2))
     y_t_m_1 = y_0_reparam.to(device)
     return y_t_m_1
 
 
-def p_sample_loop(model, x, x_mark, y_0_hat, gx, y_T_mean, n_steps, alphas, one_minus_alphas_bar_sqrt):
+def p_sample_loop(model, x, x_mark, y_0_hat, gx, y_T_mean, n_steps, alphas, one_minus_alphas_bar_sqrt, alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev):
     device = next(model.parameters()).device
     z = torch.randn_like(y_T_mean).to(device) # sample 
     cur_y = torch.sqrt(gx) * z + y_T_mean  # sample y_T
@@ -119,10 +166,10 @@ def p_sample_loop(model, x, x_mark, y_0_hat, gx, y_T_mean, n_steps, alphas, one_
     y_p_seq = [cur_y]
     for t in reversed(range(1, n_steps)):  # t from T to 2
         y_t = cur_y
-        cur_y = p_sample(model, x, x_mark, y_t, y_0_hat, gx, y_T_mean, t, alphas, one_minus_alphas_bar_sqrt)  # y_{t-1}
+        cur_y = p_sample(model, x, x_mark, y_t, y_0_hat, gx, y_T_mean, t, alphas, one_minus_alphas_bar_sqrt,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev)  # y_{t-1}
         y_p_seq.append(cur_y)
     assert len(y_p_seq) == n_steps
-    y_0 = p_sample_t_1to0(model, x, x_mark, y_p_seq[-1], y_0_hat, gx, y_T_mean, one_minus_alphas_bar_sqrt)
+    y_0 = p_sample_t_1to0(model, x, x_mark, y_p_seq[-1], y_0_hat, gx, y_T_mean, one_minus_alphas_bar_sqrt,alphas,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev)
     y_p_seq.append(y_0)
     return y_p_seq
 

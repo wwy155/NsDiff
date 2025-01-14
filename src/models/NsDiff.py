@@ -19,6 +19,29 @@ def dict2namespace(config):
     return namespace
 
 
+def compute_tilde_alpha(alpha: torch.Tensor) -> torch.Tensor:
+    alpha = alpha.float()
+    n = alpha.shape[0]
+    tilde_alpha = torch.zeros_like(alpha)  
+    
+    for t in range(n):
+        slice_t = alpha[:t+1].flip(dims=[0])
+        cprod = torch.cumprod(slice_t, dim=0)
+        tilde_alpha[t] = cprod.sum()
+    return tilde_alpha
+
+
+# def compute_tilde_alpha(alpha):
+#     n = len(alpha)
+#     tilde_alpha = np.zeros(n, dtype=float)
+#     for t in range(n):
+#         import pdb;pdb.set_trace()
+#         slice_t = alpha[t::-1] 
+#         cprod = np.cumprod(slice_t)
+#         tilde_alpha[t] = cprod.sum()
+    
+#     return tilde_alpha
+
 class NsDiff(nn.Module):
     """
     Vanilla Transformer
@@ -51,13 +74,22 @@ class NsDiff(nn.Module):
         self.alphas = alphas
         self.one_minus_betas_sqrt = torch.sqrt(alphas)
         alphas_cumprod = alphas.to('cpu').cumprod(dim=0).to(self.device)
+        self.alphas_cumprod = alphas_cumprod
         self.alphas_bar_sqrt = torch.sqrt(alphas_cumprod)
+        
+        # self.alphas_cumprod_sum = torch.cumsum(alphas_cumprod.flip(0), dim=0).flip(0)
+        self.alphas_cumprod_sum = compute_tilde_alpha(alphas)
+        
         self.one_minus_alphas_bar_sqrt = torch.sqrt(1 - alphas_cumprod)
         if diffusion_config.diffusion.beta_schedule == "cosine":
             self.one_minus_alphas_bar_sqrt *= 0.9999  # avoid division by 0 for 1/sqrt(alpha_bar_t) during inference
         alphas_cumprod_prev = torch.cat(
             [torch.ones(1, device=self.device), alphas_cumprod[:-1]], dim=0
         )
+        self.alphas_cumprod_sum_prev = torch.cat(
+            [torch.ones(1, device=self.device), self.alphas_cumprod_sum[:-1]], dim=0
+        )
+
         self.alphas_cumprod_prev = alphas_cumprod_prev
         self.posterior_mean_coeff_1 = (
                 betas * torch.sqrt(alphas_cumprod_prev) / (1.0 - alphas_cumprod)
