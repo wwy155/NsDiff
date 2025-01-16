@@ -133,29 +133,22 @@ def p_sample(model, x, x_mark, y, y_0_hat, gx, y_T_mean, t, alphas, one_minus_al
     betas_tiled = extract(betas_tiled_all, t, y)
     betas_bar = extract(betas_bar_all, t, y)
     # estimate Sigma Y0
-    # lambda_0 = alpha_t*(1 - alpha_t)*betas_tiled_m_1
-    # lambda_1 = (1 - alpha_t)**2*betas_tiled_m_1 + alpha_t*(1 - alpha_t)*(betas_bar_m_1 - betas_tiled_m_1)*gx - sigma_theta*(alpha_t*betas_tiled_m_1 + alpha_t*(1 - alpha_t))
-    # lambda_2 = gx**2*(1 - alpha_t)**2*(betas_bar_m_1 - betas_tiled_m_1) - sigma_theta*gx*(alpha_t*betas_bar_m_1 - alpha_t*betas_tiled_m_1 + (1 - alpha_t)**2)
-    # sigma_y0_hat = (-lambda_1 + ((lambda_1)**2 - 4*lambda_0*lambda_2).sqrt()  )/(2*lambda_0)
-    # noise = (betas_bar - betas_tiled)*gx + betas_tiled*sigma_y0_hat
-    # # assert (noise > 0).all()
+    lambda_0 = alpha_t*(1 - alpha_t)*betas_tiled_m_1
+    lambda_1 = ((1 - alpha_t)**2*betas_tiled_m_1 + alpha_t*(1 - alpha_t)*(betas_bar_m_1 - betas_tiled_m_1))*gx - sigma_theta*(alpha_t*betas_tiled_m_1 + alpha_t*(1 - alpha_t))
+    lambda_2 = gx**2*(1 - alpha_t)**2*(betas_bar_m_1 - betas_tiled_m_1) - sigma_theta*gx*(alpha_t*betas_bar_m_1 - alpha_t*betas_tiled_m_1 + (1 - alpha_t)**2)
+    sigma_y0_hat = (-lambda_1 + ((lambda_1)**2 - 4*lambda_0*lambda_2).sqrt()  )/(2*lambda_0)
+    noise = (betas_bar - betas_tiled)*gx + betas_tiled*sigma_y0_hat
+    assert (noise >= 0).all()
     # noise[noise<=0] = gx[noise<=0]
-    noise = (betas_bar)*gx
+    # noise = (betas_bar)*gx
 
     
     # y_t_m_1 posterior mean component coefficients, when inference, use gx to replace \Sigma_{Y_0}
-    # at, at_bar, at_tilde, Sigma_1, Sigma_2 = cal_sigma12(alphas, alphas_cumprod, alphas_cumprod_sum,alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled_m_1_all, betas_bar_m_1_all, gx, sigma_y0_hat, t)
-    # gamma_0 = (1 - alpha_t) * sqrt_alpha_bar_t_m_1 / (sqrt_one_minus_alpha_bar_t.square())
-    # gamma_1 = (sqrt_one_minus_alpha_bar_t_m_1.square()) * (alpha_t.sqrt()) / (sqrt_one_minus_alpha_bar_t.square())
-    # gamma_2 = 1 + (sqrt_alpha_bar_t - 1) * (alpha_t.sqrt() + sqrt_alpha_bar_t_m_1) / (
-    #     sqrt_one_minus_alpha_bar_t.square())
-    
-    
     # y_0 reparameterization
     y_0_reparam = 1 / sqrt_alpha_bar_t * (
             y - (1 - sqrt_alpha_bar_t) * y_T_mean - eps_theta*torch.sqrt(noise))
     # posterior mean
-    gamma_0, gamma_1, gamma_2 = calc_gammas(alphas, alphas_cumprod, alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled_m_1_all, betas_bar_m_1_all, gx, gx, t)
+    gamma_0, gamma_1, gamma_2 = calc_gammas(alphas, alphas_cumprod, alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled_m_1_all, betas_bar_m_1_all, gx, sigma_y0_hat, t)
     y_t_m_1_hat = gamma_0 * y_0_reparam + gamma_1 * y + gamma_2 * y_T_mean
     # posterior variance
     y_t_m_1 = y_t_m_1_hat.to(device) + torch.sqrt(sigma_theta) *z.to(device)
@@ -182,14 +175,13 @@ def p_sample_t_1to0(model, x, x_mark, y, y_0_hat, gx, y_T_mean, one_minus_alphas
     betas_bar = extract(betas_bar_all, t, y)
 
     # estimate Sigma Y0
-    # lambda_0 = alpha_t*(1 - alpha_t)*betas_tiled_m_1
-    # lambda_1 = (1 - alpha_t)**2*betas_tiled_m_1 + alpha_t*(1 - alpha_t)*(betas_bar_m_1 - betas_tiled_m_1)*gx - sigma_theta*(alpha_t*betas_tiled_m_1 + alpha_t*(1 - alpha_t))
-    # lambda_2 = gx**2*(1 - alpha_t)**2*(betas_bar_m_1 - betas_tiled_m_1) - sigma_theta*gx*(alpha_t*betas_bar_m_1 - alpha_t*betas_tiled_m_1 + (1 - alpha_t)**2)
-    # sigma_y0_hat = (-lambda_1 + ((lambda_1)**2 - 4*lambda_0*lambda_2).sqrt()  )/(2*lambda_0)
-    # noise = (betas_bar - betas_tiled)*gx + betas_tiled*sigma_y0_hat
-    noise = (betas_bar - betas_tiled)*gx + betas_tiled*gx
-    
-    # assert (noise > 0).all()
+    lambda_0 = alpha_t*(1 - alpha_t)*betas_tiled_m_1
+    lambda_1 = ((1 - alpha_t)**2*betas_tiled_m_1 + alpha_t*(1 - alpha_t)*(betas_bar_m_1 - betas_tiled_m_1))*gx - sigma_theta*(alpha_t*betas_tiled_m_1 + alpha_t*(1 - alpha_t))
+    lambda_2 = gx**2*(1 - alpha_t)**2*(betas_bar_m_1 - betas_tiled_m_1) - sigma_theta*gx*(alpha_t*betas_bar_m_1 - alpha_t*betas_tiled_m_1 + (1 - alpha_t)**2)
+    sigma_y0_hat = (-lambda_1 + ((lambda_1)**2 - 4*lambda_0*lambda_2).sqrt()  )/(2*lambda_0)
+    noise = (betas_bar - betas_tiled)*gx + betas_tiled*sigma_y0_hat
+    # noise = (betas_bar - betas_tiled)*gx + betas_tiled*gx
+    assert (noise >= 0).all()
     # noise[noise<=0] = gx[noise<=0]
     
     # at, at_bar, at_tilde, Sigma_1, Sigma_2 = cal_sigma12(alphas, alphas_cumprod,alphas_cumprod_sum,alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled_m_1_all, betas_bar_m_1_all, gx, gx, t)

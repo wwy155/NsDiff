@@ -97,7 +97,6 @@ class NsDiff(nn.Module):
         self.alphas_bar_sqrt = torch.sqrt(alphas_cumprod)
         
         self.betas_bar = 1 - self.alphas_cumprod
-        
         # self.alphas_cumprod_sum = torch.cumsum(alphas_cumprod.flip(0), dim=0).flip(0)
         self.alphas_cumprod_sum = compute_tilde_alpha(alphas)
         
