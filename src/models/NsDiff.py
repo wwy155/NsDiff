@@ -30,6 +30,25 @@ def compute_tilde_alpha(alpha: torch.Tensor) -> torch.Tensor:
         tilde_alpha[t] = cprod.sum()
     return tilde_alpha
 
+def compute_hat_alpha(alpha: torch.Tensor) -> torch.Tensor:
+    alpha = alpha.float()
+    n = alpha.shape[0]
+    hat_alpha = torch.zeros_like(alpha)  
+    for t in range(n):
+        slice_t = alpha[:t+1].flip(dims=[0]) # at, at-1, at-2, ...
+        cprod = torch.cumprod(slice_t, dim=0) # at, at-1*at, at-1*at-2*at, ...
+        cprod = cprod * slice_t # at^2, at-1^2*at, at-1*at-2^2*at, ...
+        hat_alpha[t] = cprod.sum()
+    return hat_alpha
+
+    # n = len(alpha)
+    # if n == 0:
+    #     return []
+    # res = [0]*n
+    # res[0] = alpha[0]**2
+    # for t in range(1, n):
+    #     res[t] = alpha[t]**2 + alpha[t]*res[t-1]
+    # return torch.tensor(res)
 
 # def compute_tilde_alpha(alpha):
 #     n = len(alpha)
@@ -77,8 +96,27 @@ class NsDiff(nn.Module):
         self.alphas_cumprod = alphas_cumprod
         self.alphas_bar_sqrt = torch.sqrt(alphas_cumprod)
         
+        self.betas_bar = 1 - self.alphas_cumprod
+        
         # self.alphas_cumprod_sum = torch.cumsum(alphas_cumprod.flip(0), dim=0).flip(0)
         self.alphas_cumprod_sum = compute_tilde_alpha(alphas)
+        
+        self.alphas_tilde = self.alphas_cumprod_sum
+        self.alphas_hat = compute_hat_alpha(alphas).to(self.device)
+        self.betas_tilde = self.alphas_tilde  - self.alphas_hat
+        # import pdb;pdb.set_trace()
+        assert (torch.tensor(self.betas_tilde) >= 0).all()
+        assert ((self.betas_bar - self.betas_tilde)>=0).all()
+        # (self.betas_bar - self.betas_tilde)[((self.betas_bar - self.betas_tilde)>0)]
+        
+        
+        self.betas_tilde_m_1 = torch.cat(
+            [torch.ones(1, device=self.device), self.betas_tilde[:-1]], dim=0
+        )
+        self.betas_bar_m_1 = torch.cat(
+            [torch.ones(1, device=self.device), self.betas_bar[:-1]], dim=0
+        )
+
         
         self.one_minus_alphas_bar_sqrt = torch.sqrt(1 - alphas_cumprod)
         if diffusion_config.diffusion.beta_schedule == "cosine":

@@ -57,7 +57,7 @@ class SigmaEstimation(nn.Module):
         
         sigma = wv_sigma_trailing(x_enc, self.kernel_size, discard_rep=True)        
         # 2. Use MLP to predict future sigma values
-        sigma = sigma[:, -(T - self.kernel_size):, :]
+        sigma = sigma[:, -(T - self.kernel_size):, :] + 10e-8
         pred_sigma = self.mlp(sigma.permute(0, 2, 1))  # (B, T, N) -> (B, N, T)
         
         # 3. Extract the last `pred_len` time steps for prediction

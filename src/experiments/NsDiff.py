@@ -21,7 +21,7 @@ import torch.multiprocessing as mp
 from torch_timeseries.utils.parse_type import parse_type
 
 from torch_timeseries.utils.early_stop import EarlyStopping
-from src.layer.nsdiff_utils import q_sample, p_sample_loop, cal_sigma12, cal_sigma_tilde
+from src.layer.nsdiff_utils import q_sample, p_sample_loop, cal_sigma12, cal_sigma_tilde, cal_forward_noise
 
 import numpy as np
 import torch.distributed as dist
@@ -32,7 +32,7 @@ from types import SimpleNamespace
 from src.utils.sigma import wv_sigma, wv_sigma_trailing
 
 
-EPS= 10e-5
+EPS= 10e-8
 class NSDiffEarlyStopping(EarlyStopping):
     def save_checkpoint(self, val_loss, model):
         """Saves model when validation loss decrease."""
@@ -95,7 +95,7 @@ class NsDiffParameters:
 
 @dataclass
 class NsDiffForecast(ProbForecastExp, NsDiffParameters):
-    model_type: str = "NsDiff1"
+    model_type: str = "NsDiff2"
     def _init_model(self):
         self.label_len = self.windows // 2
         args_dict = {
@@ -325,18 +325,18 @@ class NsDiffForecast(ProbForecastExp, NsDiffParameters):
         y_T_mean = y_0_hat_batch
         e = torch.randn_like(batch_y).to(self.device)
 
-        at, at_bar, at_tilde, Sigma_1, Sigma_2 = cal_sigma12(self.model.alphas, self.model.alphas_cumprod, 
-                                                             self.model.alphas_cumprod_sum,self.model.alphas_cumprod_prev, 
-                                                             self.model.alphas_cumprod_sum_prev, 
-                                                             gx, y_sigma, t)
-        noise = e * torch.sqrt(Sigma_2)
-        sigma_tilde = cal_sigma_tilde(self.model.alphas, self.model.alphas_cumprod, self.model.alphas_cumprod_sum,self.model.alphas_cumprod_prev, self.model.alphas_cumprod_sum_prev, gx, y_sigma, t)
+        
+        forward_noise = cal_forward_noise(self.model.betas_tilde, self.model.betas_bar, gx, y_sigma, t)
+        noise = e * torch.sqrt(forward_noise)
+        
+        sigma_tilde = cal_sigma_tilde(self.model.alphas, self.model.alphas_cumprod, self.model.alphas_cumprod_sum, 
+                                      self.model.alphas_cumprod_prev, self.model.alphas_cumprod_sum_prev, 
+                                      self.model.betas_tilde_m_1, self.model.betas_bar_m_1, gx, y_sigma, t)
 
         y_t_batch = q_sample(batch_y, y_T_mean, self.model.alphas_bar_sqrt,
                                 self.model.one_minus_alphas_bar_sqrt, t, noise=noise)
         
         output, sigma_theta = self.model(batch_x, batch_x_mark, y_t_batch, y_0_hat_batch, gx, t)
-        
         sigma_theta = sigma_theta + EPS
         
         # loss = (e[:, -self.args.pred_len:, :] - output[:, -self.args.pred_len:, :]).square().mean()
@@ -393,8 +393,6 @@ class NsDiffForecast(ProbForecastExp, NsDiffParameters):
             return gen_y
 
 
-        # dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-        # dec_inp = torch.cat([batch_y[:, :self.label_len, :], dec_inp], dim=1).float().to(self.device)
 
         n = batch_x.size(0)
         t = torch.randint(
@@ -428,7 +426,10 @@ class NsDiffForecast(ProbForecastExp, NsDiffParameters):
                                                 self.model.num_timesteps,
                                                 self.model.alphas, self.model.one_minus_alphas_bar_sqrt,
                                                 self.model.alphas_cumprod, self.model.alphas_cumprod_sum,
-                                                self.model.alphas_cumprod_prev, self.model.alphas_cumprod_sum_prev)
+                                                self.model.alphas_cumprod_prev, self.model.alphas_cumprod_sum_prev,
+                                                self.model.betas_tilde, self.model.betas_bar,
+                                                self.model.betas_tilde_m_1, self.model.betas_bar_m_1,
+                                                )
                 gen_y = store_gen_y_at_step_t(config=self.model.args,
                                                 config_diff=self.model.diffusion_config,
                                                 idx=self.model.num_timesteps, y_tile_seq=y_tile_seq)
