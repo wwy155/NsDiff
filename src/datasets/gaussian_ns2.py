@@ -8,7 +8,7 @@ import resource
 from torch_timeseries.core.dataset.dataset import Dataset, TimeSeriesDataset
 
 
-class GaussianNS(TimeSeriesDataset):
+class GaussianNS2(TimeSeriesDataset):
     """
     The collection of the daily exchange rates of eight foreign countries including Australia, British, Canada, Switzerland, China, Japan, New Zealand, and Singapore ranging from 1990 to 2016.
     
@@ -47,16 +47,18 @@ class GaussianNS(TimeSeriesDataset):
         
         means = np.linspace(1, 10, self.length)  # means from 1 to 10
         stddev = np.linspace(1, 10, self.length)  # variances from 1 to 10
+        
         self.means = means
         self.stddev = stddev
+
         
         # Generate synthetic data with different features
         data = np.zeros((self.length, self.num_features))
         for t in range(self.length):
             for i in range(self.num_features):
                 # For each feature, add an offset (i + 1) to the mean
-                feature_mean = means[t] # feature-specific mean (e.g., +1, +2, ...)
-                data[t, i] = np.random.normal(loc=feature_mean, scale=stddev[t], size=1)
+                feature_mean = means[t] + (i)  # feature-specific mean (e.g., +1, +2, ...)
+                data[t, i] = np.random.normal(loc=feature_mean, scale=stddev[t]**2, size=1)
         
         return data
 

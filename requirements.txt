@@ -1,8 +1,8 @@
+torch_timeseries==0.1.10
 gluonts==0.9.6
 pytorchts
 CRPS
 linear_attention_transformer
-distributions
 opt-einsum
 cmake
 pykeops 

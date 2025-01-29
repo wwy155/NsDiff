@@ -190,7 +190,7 @@ class TimeDiffForecast(ProbForecastExp, TimeDiffParameters):
         # dec_inp_date_enc = torch.cat(
         #     [batch_x_date_enc[:, self.label_len :, :], batch_y_date_enc], dim=1
         # )
-
+        
         loss= self.model.train_forward(batch_x, batch_x_date_enc, batch_y, batch_y_mark)
         return loss
 

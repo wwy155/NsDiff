@@ -184,41 +184,33 @@ class DiffusionTSForecast(ProbForecastExp, DiffusionTSParameters):
         # t_m : 1 when target(predict), 0 when features
         t_m = self.gt_mask.expand((x.shape[0], -1, -1))
         
-        x = x.repeat(self.num_samples, 1, 1)
-        t_m = t_m.repeat(self.num_samples, 1, 1)
-        
         coef = 1e-1
         stepsize = 5e-2
         model_kwargs = {}
         model_kwargs['coef'] = coef
         model_kwargs['learning_rate'] = stepsize
-
         sampling_steps =  self.sampling_timesteps
+        minisample = 10
 
-        
-        # shape = (self.pred_len, self.dataset.num_features)
-
-        # samples = np.empty([0, shape[0], shape[1]])
-        # reals = np.empty([0, shape[0], shape[1]])
-        # masks = np.empty([0, shape[0], shape[1]])
-
-        # for idx, (x, t_m) in enumerate(raw_dataloader):
-            # x, t_m = x.to(self.device), t_m.to(self.device)
-        
-        with torch.no_grad():
-            # this workd, sample_infill do not work....
-            sample = self.model.fast_sample_infill(shape=x.shape, target=x*t_m, partial_mask=t_m, model_kwargs=model_kwargs,
+        samples = []
+        for i in range(self.num_samples //minisample):
+            repeat_n = int(minisample)
             
-            # if sampling_steps == self.model.num_timesteps:
-            #     sample = self.model.sample_infill(shape=x.shape, target=x*t_m, partial_mask=t_m,
-            #                                                 model_kwargs=model_kwargs)
-            # else:
-            #     sample = self.model.fast_sample_infill(shape=x.shape, target=x*t_m, partial_mask=t_m, model_kwargs=model_kwargs,
-                                                                sampling_timesteps=sampling_steps)
+            repeat_x = x.repeat(repeat_n, 1, 1)
+            repeat_t_m = t_m.repeat(repeat_n, 1, 1)
+
+            with torch.no_grad():
+                # this works, sample_infill do not work....
+                sample = self.model.fast_sample_infill(shape=repeat_x.shape, target=repeat_x*repeat_t_m, partial_mask=repeat_t_m, model_kwargs=model_kwargs,
+                                                                            sampling_timesteps=sampling_steps) # 
+                
+            sample = sample[:, -self.pred_len:, :].reshape(B, minisample, self.pred_len, self.dataset.num_features)
+            samples.append(sample)
+            
             # samples = np.row_stack([samples, sample[:, -self.pred_len:, :].detach().cpu().numpy()])
             # reals = np.row_stack([reals, x.detach().cpu().numpy()])
             # masks = np.row_stack([masks, t_m.detach().cpu().numpy()])
-        sample = sample[:, -self.pred_len:, :]
+        sample = torch.concat(samples, dim=1)
         sample = sample.reshape(B, self.num_samples, self.pred_len, self.dataset.num_features).permute(0,2,3, 1)
         assert (sample.shape[1], sample.shape[2], sample.shape[3]) == (self.pred_len, self.dataset.num_features, self.num_samples)
         return sample, batch_y

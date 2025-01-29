@@ -21,7 +21,7 @@ class SigmaEstimation(nn.Module):
     Non-stationary Transformer
     """
 
-    def __init__(self, seq_len, pred_len, enc_in, hidden_size, kernel_size=24):
+    def __init__(self, seq_len, pred_len, enc_in, hidden_size=512, kernel_size=24):
         super(SigmaEstimation, self).__init__()
         self.pred_len = pred_len
         self.seq_len = seq_len
@@ -32,6 +32,8 @@ class SigmaEstimation(nn.Module):
         # Define 2-layer MLP for predicting future sigmas
         self.mlp = nn.Sequential(
             nn.Linear(seq_len -  kernel_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),  # Output size should match enc_in
             nn.ReLU(),
             nn.Linear(hidden_size, pred_len)  # Output size should match enc_in
         )

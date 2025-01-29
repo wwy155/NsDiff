@@ -18,6 +18,17 @@ def dict2namespace(config):
         setattr(namespace, key, new_value)
     return namespace
 
+def compute_gx_term(alpha: torch.Tensor) -> torch.Tensor:
+    alpha = alpha.float()
+    n = alpha.shape[0]
+    gx_term = torch.zeros_like(alpha)  
+    for t in range(n):
+        slice_t = alpha[:t+1].flip(dims=[0]) # at, at-1, at-2, a1
+        cprod = torch.cat([torch.tensor([1]).to(slice_t.device), torch.cumprod(slice_t, dim=0)])
+        cprod = cprod[:-1] * ((1 - slice_t)**2) # at^2, at-1^2*at, at-1*at-2^2*at, ...
+        gx_term[t] = cprod.sum()
+    return gx_term
+
 
 def compute_tilde_alpha(alpha: torch.Tensor) -> torch.Tensor:
     alpha = alpha.float()
@@ -69,24 +80,16 @@ class NsDiff(nn.Module):
     def __init__(self, configs, device):
         super(NsDiff, self).__init__()
 
-        with open(configs.diffusion_config_dir, "r") as f:
-            config = yaml.unsafe_load(f)
-            diffusion_config = dict2namespace(config)
 
-        diffusion_config.diffusion.timesteps = configs.timesteps
         
         self.args = configs
         self.device = device
-        self.diffusion_config = diffusion_config
 
-        self.model_var_type = diffusion_config.model.var_type
-        self.num_timesteps = diffusion_config.diffusion.timesteps
-        self.vis_step = diffusion_config.diffusion.vis_step
-        self.num_figs = diffusion_config.diffusion.num_figs
+        # self.model_var_type = configs.var_type
+        self.num_timesteps = configs.timesteps
         self.dataset_object = None
-
-        betas = make_beta_schedule(schedule=diffusion_config.diffusion.beta_schedule, num_timesteps=self.num_timesteps,
-                                   start=diffusion_config.diffusion.beta_start, end=diffusion_config.diffusion.beta_end)
+        betas = make_beta_schedule(schedule=configs.beta_schedule, num_timesteps=configs.timesteps,
+                                   start=configs.beta_start, end=configs.beta_end)
         betas = self.betas = betas.float().to(self.device)
         self.betas_sqrt = torch.sqrt(betas)
         alphas = 1.0 - betas
@@ -103,8 +106,10 @@ class NsDiff(nn.Module):
         self.alphas_tilde = self.alphas_cumprod_sum
         self.alphas_hat = compute_hat_alpha(alphas).to(self.device)
         self.betas_tilde = self.alphas_tilde  - self.alphas_hat
+        self.gx_term = compute_gx_term(alphas).to(self.device) # full compute to avoid precision issue
         # import pdb;pdb.set_trace()
         assert (torch.tensor(self.betas_tilde) >= 0).all()
+        # import pdb;pdb.set_trace(), ((self.betas_bar - self.betas_tilde)[((self.betas_bar - self.betas_tilde)>=0)])
         assert ((self.betas_bar - self.betas_tilde)>=0).all()
         # (self.betas_bar - self.betas_tilde)[((self.betas_bar - self.betas_tilde)>0)]
         
@@ -118,7 +123,7 @@ class NsDiff(nn.Module):
 
         
         self.one_minus_alphas_bar_sqrt = torch.sqrt(1 - alphas_cumprod)
-        if diffusion_config.diffusion.beta_schedule == "cosine":
+        if configs.beta_schedule == "cosine":
             self.one_minus_alphas_bar_sqrt *= 0.9999  # avoid division by 0 for 1/sqrt(alpha_bar_t) during inference
         alphas_cumprod_prev = torch.cat(
             [torch.ones(1, device=self.device), alphas_cumprod[:-1]], dim=0
@@ -138,17 +143,17 @@ class NsDiff(nn.Module):
                 betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
         )
         self.posterior_variance = posterior_variance
-        if self.model_var_type == "fixedlarge":
-            self.logvar = betas.log()
-            # torch.cat(
-            # [posterior_variance[1:2], betas[1:]], dim=0).log()
-        elif self.model_var_type == "fixedsmall":
-            self.logvar = posterior_variance.clamp(min=1e-20).log()
+        # if self.model_var_type == "fixedlarge":
+        #     self.logvar = betas.log()
+        #     # torch.cat(
+        #     # [posterior_variance[1:2], betas[1:]], dim=0).log()
+        # elif self.model_var_type == "fixedsmall":
+        #     self.logvar = posterior_variance.clamp(min=1e-20).log()
 
         self.tau = None  # precision fo test NLL computation
 
         # CATE MLP
-        self.diffussion_model = ConditionalGuidedModel(diffusion_config.diffusion.timesteps, configs.enc_in)
+        self.diffussion_model = ConditionalGuidedModel(configs.timesteps, configs.enc_in)
 
         self.enc_embedding = DataEmbedding(configs.enc_in, configs.CART_input_x_embed_dim, configs.embed, configs.freq,
                                            configs.dropout)

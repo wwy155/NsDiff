@@ -60,9 +60,15 @@ def cal_forward_noise(betas_tiled, betas_bar, gx, y_sigma, t):
     b_tilded_t =  extract(betas_tiled, t, gx)
     
     noise = (b_bar_t - b_tilded_t)*gx + b_tilded_t*y_sigma
-    assert (noise > 0).all()
-    # if not (noise > 0).all():
-    #     import pdb;pdb.set_trace()
+    assert (noise >= 0).all()
+    return noise
+
+def cal_forward_noise_full(betas_tiled, full_gt, gx, y_sigma, t):
+    full_gt_t =  extract(full_gt, t, gx)
+    b_tilded_t =  extract(betas_tiled, t, gx)
+    
+    noise = (full_gt_t)*gx + b_tilded_t*y_sigma
+    assert (noise >= 0).all()
     return noise
 
 
@@ -138,10 +144,6 @@ def p_sample(model, x, x_mark, y, y_0_hat, gx, y_T_mean, t, alphas, one_minus_al
     lambda_2 = gx**2*(1 - alpha_t)**2*(betas_bar_m_1 - betas_tiled_m_1) - sigma_theta*gx*(alpha_t*betas_bar_m_1 - alpha_t*betas_tiled_m_1 + (1 - alpha_t)**2)
     sigma_y0_hat = (-lambda_1 + ((lambda_1)**2 - 4*lambda_0*lambda_2).sqrt()  )/(2*lambda_0)
     noise = (betas_bar - betas_tiled)*gx + betas_tiled*sigma_y0_hat
-    assert (noise >= 0).all()
-    # noise[noise<=0] = gx[noise<=0]
-    # noise = (betas_bar)*gx
-
     
     # y_t_m_1 posterior mean component coefficients, when inference, use gx to replace \Sigma_{Y_0}
     # y_0 reparameterization
@@ -154,6 +156,53 @@ def p_sample(model, x, x_mark, y, y_0_hat, gx, y_T_mean, t, alphas, one_minus_al
     y_t_m_1 = y_t_m_1_hat.to(device) + torch.sqrt(sigma_theta) *z.to(device)
     return y_t_m_1
 
+
+
+# Reverse function -- sample y_{t-1} given y_t
+def p_sample_pe(model, x, x_mark, y, y_0_hat, gx, y_T_mean, t, alphas, one_minus_alphas_bar_sqrt, alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled_all, betas_bar_all, betas_tiled_m_1_all, betas_bar_m_1_all):
+    """
+    Reverse diffusion process sampling -- one time step.
+
+    y: sampled y at time step t, y_t.
+    y_0_hat: prediction of pre-trained guidance model.
+    y_T_mean: mean of prior distribution at timestep T.
+    We replace y_0_hat with y_T_mean in the forward process posterior mean computation, emphasizing that 
+        guidance model prediction y_0_hat = f_phi(x) is part of the input to eps_theta network, while 
+        in paper we also choose to set the prior mean at timestep T y_T_mean = f_phi(x).
+    """
+    device = next(model.parameters()).device
+    t = torch.tensor([t]).to(device)
+    eps_theta, sigma_theta = model(x, x_mark, y, y_0_hat, gx, t)
+    
+    eps_theta = eps_theta.to(device).detach()
+    sigma_theta = sigma_theta.to(device).detach()
+    
+    z =  torch.randn_like(y)  # if t > 1 else torch.zeros_like(y)
+    alpha_t = extract(alphas, t, y)
+    
+    sqrt_one_minus_alpha_bar_t = extract(one_minus_alphas_bar_sqrt, t, y)
+    sqrt_one_minus_alpha_bar_t_m_1 = extract(one_minus_alphas_bar_sqrt, t - 1, y)
+    sqrt_alpha_bar_t = (1 - sqrt_one_minus_alpha_bar_t.square()).sqrt()
+    sqrt_alpha_bar_t_m_1 = (1 - sqrt_one_minus_alpha_bar_t_m_1.square()).sqrt()
+    
+    betas_tiled_m_1 = extract(betas_tiled_m_1_all, t, y)
+    betas_bar_m_1 = extract(betas_bar_m_1_all, t, y)
+    betas_tiled = extract(betas_tiled_all, t, y)
+    betas_bar = extract(betas_bar_all, t, y)
+    # estimate Sigma Y0
+    sigma_y0_hat = gx #(-lambda_1 + ((lambda_1)**2 - 4*lambda_0*lambda_2).sqrt()  )/(2*lambda_0)
+    noise = (betas_bar )*gx
+    
+    # y_t_m_1 posterior mean component coefficients, when inference, use gx to replace \Sigma_{Y_0}
+    # y_0 reparameterization
+    y_0_reparam = 1 / sqrt_alpha_bar_t * (
+            y - (1 - sqrt_alpha_bar_t) * y_T_mean - eps_theta*torch.sqrt(noise))
+    # posterior mean
+    gamma_0, gamma_1, gamma_2 = calc_gammas(alphas, alphas_cumprod, alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled_m_1_all, betas_bar_m_1_all, gx, gx, t)
+    y_t_m_1_hat = gamma_0 * y_0_reparam + gamma_1 * y + gamma_2 * y_T_mean
+    # posterior variance
+    y_t_m_1 = y_t_m_1_hat.to(device) + torch.sqrt(sigma_theta) *z.to(device)
+    return y_t_m_1
 
 # Reverse function -- sample y_0 given y_1
 def p_sample_t_1to0(model, x, x_mark, y, y_0_hat, gx, y_T_mean, one_minus_alphas_bar_sqrt,alphas,alphas_cumprod,alphas_cumprod_sum,alpha_bar_prev, alphas_cumprod_sum_prev,betas_tiled_all, betas_bar_all, betas_tiled_m_1_all, betas_bar_m_1_all):
@@ -180,11 +229,6 @@ def p_sample_t_1to0(model, x, x_mark, y, y_0_hat, gx, y_T_mean, one_minus_alphas
     lambda_2 = gx**2*(1 - alpha_t)**2*(betas_bar_m_1 - betas_tiled_m_1) - sigma_theta*gx*(alpha_t*betas_bar_m_1 - alpha_t*betas_tiled_m_1 + (1 - alpha_t)**2)
     sigma_y0_hat = (-lambda_1 + ((lambda_1)**2 - 4*lambda_0*lambda_2).sqrt()  )/(2*lambda_0)
     noise = (betas_bar - betas_tiled)*gx + betas_tiled*sigma_y0_hat
-    # noise = (betas_bar - betas_tiled)*gx + betas_tiled*gx
-    assert (noise >= 0).all()
-    # noise[noise<=0] = gx[noise<=0]
-    
-    # at, at_bar, at_tilde, Sigma_1, Sigma_2 = cal_sigma12(alphas, alphas_cumprod,alphas_cumprod_sum,alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled_m_1_all, betas_bar_m_1_all, gx, gx, t)
     
     
     # y_0 reparameterization
@@ -193,6 +237,35 @@ def p_sample_t_1to0(model, x, x_mark, y, y_0_hat, gx, y_T_mean, one_minus_alphas
     y_t_m_1 = y_0_reparam.to(device)
     return y_t_m_1
 
+
+def p_sample_t_1to0_pe(model, x, x_mark, y, y_0_hat, gx, y_T_mean, one_minus_alphas_bar_sqrt,alphas,alphas_cumprod,alphas_cumprod_sum,alpha_bar_prev, alphas_cumprod_sum_prev,betas_tiled_all, betas_bar_all, betas_tiled_m_1_all, betas_bar_m_1_all):
+    device = next(model.parameters()).device
+    t = torch.tensor([0]).to(device)  # corresponding to timestep 1 (i.e., t=1 in diffusion models)
+    sqrt_one_minus_alpha_bar_t = extract(one_minus_alphas_bar_sqrt, t, y)
+    sqrt_alpha_bar_t = (1 - sqrt_one_minus_alpha_bar_t.square()).sqrt()
+    eps_theta, sigma_theta = model(x, x_mark, y, y_0_hat, gx, t)
+    
+    # at_tilde = extract(alphas_cumprod_sum, t, gx)
+    
+    eps_theta = eps_theta.to(device).detach()
+    sigma_theta = sigma_theta.to(device).detach()
+    alpha_t = extract(alphas, t, y)
+    
+    betas_tiled_m_1 = extract(betas_tiled_m_1_all, t, y)
+    betas_bar_m_1 = extract(betas_bar_m_1_all, t, y)
+    betas_tiled = extract(betas_tiled_all, t, y)
+    betas_bar = extract(betas_bar_all, t, y)
+
+    # estimate Sigma Y0
+    sigma_y0_hat = gx #(-lambda_1 + ((lambda_1)**2 - 4*lambda_0*lambda_2).sqrt()  )/(2*lambda_0)
+    noise = (betas_bar)*gx
+    
+    
+    # y_0 reparameterization
+    y_0_reparam = 1 / sqrt_alpha_bar_t * (
+            y - (1 - sqrt_alpha_bar_t) * y_T_mean - eps_theta * torch.sqrt(noise))
+    y_t_m_1 = y_0_reparam.to(device)
+    return y_t_m_1
 
 def p_sample_loop(model, x, x_mark, y_0_hat, gx, y_T_mean, n_steps, alphas, one_minus_alphas_bar_sqrt, alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled, betas_bar, betas_tiled_m_1, betas_bar_m_1):
     device = next(model.parameters()).device
@@ -206,6 +279,22 @@ def p_sample_loop(model, x, x_mark, y_0_hat, gx, y_T_mean, n_steps, alphas, one_
         y_p_seq.append(cur_y)
     assert len(y_p_seq) == n_steps
     y_0 = p_sample_t_1to0(model, x, x_mark, y_p_seq[-1], y_0_hat, gx, y_T_mean, one_minus_alphas_bar_sqrt,alphas,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled, betas_bar, betas_tiled_m_1, betas_bar_m_1)
+    y_p_seq.append(y_0)
+    return y_p_seq
+
+
+def p_sample_loop_pe(model, x, x_mark, y_0_hat, gx, y_T_mean, n_steps, alphas, one_minus_alphas_bar_sqrt, alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled, betas_bar, betas_tiled_m_1, betas_bar_m_1):
+    device = next(model.parameters()).device
+    z = torch.randn_like(y_T_mean).to(device) # sample 
+    cur_y = torch.sqrt(gx) * z + y_T_mean  # sample y_T
+    
+    y_p_seq = [cur_y]
+    for t in reversed(range(1, n_steps)):  # t from T to 2
+        y_t = cur_y
+        cur_y = p_sample_pe(model, x, x_mark, y_t, y_0_hat, gx, y_T_mean, t, alphas, one_minus_alphas_bar_sqrt,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled, betas_bar, betas_tiled_m_1, betas_bar_m_1)  # y_{t-1}
+        y_p_seq.append(cur_y)
+    assert len(y_p_seq) == n_steps
+    y_0 = p_sample_t_1to0_pe(model, x, x_mark, y_p_seq[-1], y_0_hat, gx, y_T_mean, one_minus_alphas_bar_sqrt,alphas,alphas_cumprod,alphas_cumprod_sum, alpha_bar_prev, alphas_cumprod_sum_prev, betas_tiled, betas_bar, betas_tiled_m_1, betas_bar_m_1)
     y_p_seq.append(y_0)
     return y_p_seq
 

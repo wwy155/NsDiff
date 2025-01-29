@@ -153,7 +153,10 @@ class Diffusion_Worker(nn.Module):
 
         B = np.shape(x)[0]
         t = torch.randint(0, self.num_timesteps, size=[B//2,]).long().to(self.device)
-        t = torch.cat([t, self.num_timesteps-1-t], dim=0)
+        if B%2:
+            t = torch.cat([t, self.num_timesteps-1-t, torch.randint(0, self.num_timesteps, size=[1,]).to(self.device)], dim=0)
+        else:
+            t = torch.cat([t, self.num_timesteps-1-t], dim=0)
         noise = torch.randn_like(x)
         x_k = self.q_sample(x_start=x, t=t, noise=noise)
         

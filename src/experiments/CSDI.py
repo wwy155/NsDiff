@@ -126,7 +126,7 @@ class CSDIForecast(ProbForecastExp, CSDIParameters):
         batch_y_date_enc = batch_y_date_enc.to(self.device).float()
 
         
-        samples, observed_data, target_mask, observed_mask, observed_tp = self.model.evaluate(batch_input, self.num_samples, 10)
+        samples, observed_data, target_mask, observed_mask, observed_tp = self.model.evaluate(batch_input, self.num_samples, 1)
         samples = samples[:, :, :, -self.pred_len:]
         return samples[:, :, :, -self.pred_len:].permute(0, 3, 2, 1), batch_y
 

@@ -1,36 +1,63 @@
 
-
-# Modification
-
-Some baselines, however, are not runnable after integrating into this repo possibily because certain experiment settings and distinct hardwares. We list these issues and related modifications:
+This is the official repo of "Non-stationary Diffusion For Probabilistic Time Series Forecasting".
 
 
-## SSSD:
+# 1 NsDiff
+NsDiff is a new diffusion-based theoretical framework for probalistic forecasting. Specifically designed for non-stationary scenarios.
 
-Q1: report nan after 1 epoch
-M1: seems caused by some issues of S4 kernel backprapogation: https://github.com/state-spaces/s4/issues/138. 
+<p align="center">
+  <img width="90%" src="https://raw.githubusercontent.com/wayne155/nsdiff/main/docs/_static/fig/overview.png?sanitize=true" />
+</p>
 
-We have to use no_grad method in the forward method of the SSKernelNPLR class  to circumvent this problem.
+
+
+# 2 install requirements
+
+```
+pip install -r ./requirements.txt
+```
+
+# 3 run
+see ./scripts/ for more examples.
+1. pretrain and run 
 ```python
-# the added line
-with torch.no_grad():
-    # Increase the internal length if needed
-    while rate * L > self.L:
-        self.double_length()
-    dt = torch.exp(self.log_dt) * rate
-    B = _r2c(self.B)
-    C = _r2c(self.C)
-    P = _r2c(self.P)
-    Q = P.conj() if self.Q is None else _r2c(self.Q)
-    w = self._w()
+#  pretraining
+bash ./scripts/pretrain_F/ETTh1.sh
+# run 
+export PYTHONPATH=./
+CUDA_DEVICE_ORDER=PCI_BUS_ID \
+python3 ./src/experiments/NsDiff.py \
+   --dataset_type="ETTh1" \
+   --device="cuda:0" \
+   --batch_size=32 \
+   --horizon=1 \
+   --pred_len=192 \
+   --windows=168 \
+   --load_pretrain=True \
+   runs --seeds='[1232132, 3]'
+
 ```
 
 
-## DiffusionTS:
+2. direct run
 
-the original version split datset in non-overlap settings, and the split scheme has to follow some prior knowledge of the time, e.g. one week 168 step to predict next day. However, in our settings, the training dataset slide in 1 step rather than window+pred steps.
+```
+# run without pretraining
+# run 
+export PYTHONPATH=./
+CUDA_DEVICE_ORDER=PCI_BUS_ID \
+python3 ./src/experiments/NsDiff.py \
+   --dataset_type="ETTh1" \
+   --device="cuda:0" \
+   --batch_size=32 \
+   --horizon=1 \
+   --pred_len=192 \
+   --windows=168 \
+   runs --seeds='[1232132, 3]'
+```
 
-We do oberserve a peformance decline in this version; however, the consistent setting make sure the experiment is justified. We provide a previous version code for you to run: experiments/DiffusionTS_nonoverlap.py
+
+
 
 
 

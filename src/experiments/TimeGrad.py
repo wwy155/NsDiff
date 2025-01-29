@@ -47,6 +47,7 @@ class TimeGradParameters:
 class TimeGradForecast(ProbForecastExp, TimeGradParameters):
     model_type: str = "TimeGrad"
     def _init_model(self):
+        self.minisample = 100
         self.model = TimeGrad(
             pred_len=self.pred_len,
             sequence_length=self.windows,
@@ -56,6 +57,7 @@ class TimeGradForecast(ProbForecastExp, TimeGradParameters):
             TimeF = freq_map[self.dataset.freq],
             rnn_hidden_size=self.rnn_hidden_size,
             rnn_type = self.rnn_type,
+            num_samples=self.minisample,
             num_layers=self.num_layers,
             dropout_rate=self.dropout_rate,
             scale=self.scale,            
@@ -101,8 +103,14 @@ class TimeGradForecast(ProbForecastExp, TimeGradParameters):
 
         # no decoder input
         # label_len = 1
-        # B, S, O, N
-        output = self.model(batch_x, batch_y, batch_x_date_enc, batch_y_date_enc, train=False)
+        
+        samples = []
+        for i in range(self.num_samples//self.minisample):
+            # B, S, O, N
+            output = self.model(batch_x, batch_y, batch_x_date_enc, batch_y_date_enc, train=False)
+            samples.append(output)
+            
+        output = torch.concat(samples, dim=1) # B, S, O, N
         output = output.permute(0, 2, 3, 1) # B, O, N, S
         return output, batch_y
 
