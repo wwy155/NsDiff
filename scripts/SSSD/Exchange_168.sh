@@ -1,11 +1,10 @@
 export PYTHONPATH=./
-export PYTHONPATH=/notebooks/pytorchtimseries:./
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
-python3 ./src/experiments/TMDM.py \
+python3 ./src/experiments/SSSD.py \
    --dataset_type="ExchangeRate" \
    --device="cuda:0" \
    --batch_size=32 \
    --horizon=1 \
-   --pred_len=48 \
-   --windows=48 \
+   --pred_len=192 \
+   --windows=168 \
    runs --seeds='[3]'

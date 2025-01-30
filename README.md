@@ -6,7 +6,7 @@ This is the official repo of "Non-stationary Diffusion For Probabilistic Time Se
 NsDiff is a new diffusion-based theoretical framework for probalistic forecasting. Specifically designed for non-stationary scenarios.
 
 <p align="center">
-  <img width="90%" src="https://raw.githubusercontent.com/wayne155/nsdiff/main/docs/_static/fig/overview.png?sanitize=true" />
+  <img width="90%" src="https://raw.githubusercontent.com/icannotnamemyself/tDiff/main/docs/_static/fig/overview.png?sanitize=true" />
 </p>
 
 
@@ -41,9 +41,8 @@ python3 ./src/experiments/NsDiff.py \
 
 2. direct run
 
-```
+```python
 # run without pretraining
-# run 
 export PYTHONPATH=./
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
 python3 ./src/experiments/NsDiff.py \

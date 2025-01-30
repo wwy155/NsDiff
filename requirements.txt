@@ -1,5 +1,5 @@
 torch_timeseries==0.1.10
-gluonts==0.9.6
+gluonts
 pytorchts
 CRPS
 linear_attention_transformer
@@ -7,3 +7,4 @@ opt-einsum
 cmake
 pykeops 
 ema-pytorch
+pyyaml

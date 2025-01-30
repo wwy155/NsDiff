@@ -1,7 +1,7 @@
 export PYTHONPATH=./
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
 python3 ./src/experiments/NsDiff.py \
-   --dataset_type="Weather" \
+   --dataset_type="ETTh1" \
    --device="cuda:0" \
    --batch_size=32 \
    --horizon=1 \
