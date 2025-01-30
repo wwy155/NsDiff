@@ -6,7 +6,7 @@ This is the official repo of "Non-stationary Diffusion For Probabilistic Time Se
 NsDiff is a new diffusion-based theoretical framework for probalistic forecasting. Specifically designed for non-stationary scenarios.
 
 <p align="center">
-  <img width="90%" src="https://raw.githubusercontent.com/icannotnamemyself/tDiff/main/docs/_static/fig/overview.png?sanitize=true" />
+  <img width="90%" src="fig/overview.png" />
 </p>
 
 
