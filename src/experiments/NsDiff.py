@@ -181,16 +181,16 @@ class NsDiffForecast(ProbForecastExp, NsDiffParameters):
 
 
 
-    def _load_best_model(self):
-        self.model.load_state_dict(
-            torch.load(os.path.join(self.run_save_dir, 'model.pth'), map_location=self.device)
-        )
-        self.cond_pred_model.load_state_dict(
-            torch.load(os.path.join(self.run_save_dir, 'cond_pred_model.pth'), map_location=self.device)
-        )
-        self.cond_pred_model_g.load_state_dict(
-            torch.load(os.path.join(self.run_save_dir, 'cond_pred_model_g.pth'), map_location=self.device)
-        )
+    # def _load_best_model(self):
+    #     self.model.load_state_dict(
+    #         torch.load(os.path.join(self.run_save_dir, 'model.pth'), map_location=self.device)
+    #     )
+    #     self.cond_pred_model.load_state_dict(
+    #         torch.load(os.path.join(self.run_save_dir, 'cond_pred_model.pth'), map_location=self.device)
+    #     )
+    #     self.cond_pred_model_g.load_state_dict(
+    #         torch.load(os.path.join(self.run_save_dir, 'cond_pred_model_g.pth'), map_location=self.device)
+    #     )
 
     def _setup_early_stopper(self):
         self.best_checkpoint_filepath = os.path.join(

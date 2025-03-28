@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from linear_attention_transformer import LinearAttentionTransformer
-
+from src.models.CSDI import diff_CSDI
 
 def get_torch_trans(heads=8, layers=1, channels=64):
     encoder_layer = nn.TransformerEncoderLayer(
@@ -62,6 +62,7 @@ class diff_CSDI(nn.Module):
     def __init__(self, config, inputdim=2):
         super().__init__()
         self.channels = config["channels"]
+
         self.diffusion_embedding = DiffusionEmbedding(
             num_steps=config["num_steps"],
             embedding_dim=config["diffusion_embedding_dim"],
@@ -644,4 +645,21 @@ class CSDI_Forecasting(CSDI_base):
             for i in range(len(cut_length)):  # to avoid double evaluation
                 target_mask[i, ..., 0 : cut_length[i].item()] = 0
         return samples, observed_data, target_mask, observed_mask, observed_tp
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
