@@ -1,6 +1,8 @@
+🚀 This is the official repo of "Non-stationary Diffusion For Probabilistic Time Series Forecasting" 
 
-This is the official repo of "Non-stationary Diffusion For Probabilistic Time Series Forecasting".
+# News
 
+📌 [2025-05-01] 🎉🎉🎉🎉🎉 NsDiff is accepted as a Spotlight poster  at ICML 2025 — Oral decision pending 🔎
 
 # 1 NsDiff
 NsDiff is a new diffusion-based theoretical framework for probalistic forecasting. Specifically designed for non-stationary scenarios.
@@ -39,7 +41,7 @@ python3 ./src/experiments/NsDiff.py \
 ```
 
 
-2. direct run
+2. run without pretraining
 
 ```python
 # run without pretraining

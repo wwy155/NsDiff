@@ -430,7 +430,7 @@ class ProbForecastExp(ForecastExp):
             if self._use_wandb():
                 wandb.log({'training_loss' : np.mean(train_losses)}, step=self.current_epoch)
                 wandb.log( {f"val_{k}": v for k, v in val_result.items()}, step=self.current_epoch)
-                # wandb.log( {f"test_{k}": v for k, v in test_result.items()}, step=self.current_epoch)
+                wandb.log( {f"test_{k}": v for k, v in test_result.items()}, step=self.current_epoch)
 
             # self.scheduler.step()
 
