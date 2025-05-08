@@ -1,5 +1,11 @@
 🚀 This is the official repo of "Non-stationary Diffusion For Probabilistic Time Series Forecasting" 
 
+# Contacts
+
+- Weiwei Ye (equal contribution): wwye155@gmail.com
+- Zhuopeng Xu (equal contribution): xuzhuopeng@csu.edu.cn
+- Ning gui (corresponding author):  ninggui@gmail.com
+
 # News
 
 📌 [2025-05-01] 🎉🎉🎉🎉🎉 NsDiff is accepted as a Spotlight poster  at ICML 2025 — Oral decision pending 🔎
