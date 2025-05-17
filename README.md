@@ -26,6 +26,9 @@ pip install -r ./requirements.txt
 ```
 
 # 3 run
+
+⚠️⚠️⚠️⚠️**The dataset will be downloaded automatically.** Just run the following scripts.
+
 see ./scripts/ for more examples.
 1. pretrain and run 
 ```python
