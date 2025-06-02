@@ -14,7 +14,7 @@
 NsDiff is a new diffusion-based theoretical framework for probalistic forecasting. Specifically designed for non-stationary scenarios.
 
 <p align="center">
-  <img width="90%" src="fig/overview.png" />
+  <img width="90%" src="fig/overview.jpg" />
 </p>
 
 
