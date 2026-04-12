@@ -1,5 +1,15 @@
 🚀 This is the official repo of "Non-stationary Diffusion For Probabilistic Time Series Forecasting" 
 
+
+
+# Important
+
+**The metrics in Table 6 about MAE/MSE is reversed.**
+Please note this information when you are reproducing our results. 
+I can change the arxiv paper, but I can not change publication text in the official ICML conference.
+
+
+
 # Contacts
 
 - Weiwei Ye (equal contribution): wwye155@gmail.com
